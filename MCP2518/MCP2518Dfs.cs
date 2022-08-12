@@ -6,19 +6,8 @@ using System.Threading;
 
 namespace MCP2518
 {
-    static class MCP2518_Registers
+    static class MCP2518Dfs
     {
-
-        // *****************************************************************************
-        // *****************************************************************************
-        /* SPI Instruction Set */
-
-        public static uint cINSTRUCTION_RESET = 0x00;
-        public static uint cINSTRUCTION_READ = 0x03;
-        public static uint cINSTRUCTION_READ_CRC = 0x0B;
-        public static uint cINSTRUCTION_WRITE = 0x02;
-        public static uint cINSTRUCTION_WRITE_CRC = 0x0A;
-        public static uint cINSTRUCTION_WRITE_SAFE = 0x0C;
 
         // *****************************************************************************
         // *****************************************************************************
@@ -217,20 +206,7 @@ namespace MCP2518
     };
 
 
-    //! CAN Operation Modes
 
-    public enum CAN_OPERATION_MODE
-    {
-        CAN_NORMAL_MODE = 0x00,
-        CAN_SLEEP_MODE = 0x01,
-        CAN_INTERNAL_LOOPBACK_MODE = 0x02,
-        CAN_LISTEN_ONLY_MODE = 0x03,
-        CAN_CONFIGURATION_MODE = 0x04,
-        CAN_EXTERNAL_LOOPBACK_MODE = 0x05,
-        CAN_CLASSIC_MODE = 0x06,
-        CAN_RESTRICTED_MODE = 0x07,
-        CAN_INVALID_MODE = 0xFF
-    };
 
     //! Transmit Bandwidth Sharing
 
@@ -373,27 +349,6 @@ namespace MCP2518
         public uint unimplemented1;
     };
 
-    //! CAN Data Length Code
-
-    public enum CAN_DLC
-    {
-        CAN_DLC_0,
-        CAN_DLC_1,
-        CAN_DLC_2,
-        CAN_DLC_3,
-        CAN_DLC_4,
-        CAN_DLC_5,
-        CAN_DLC_6,
-        CAN_DLC_7,
-        CAN_DLC_8,
-        CAN_DLC_12,
-        CAN_DLC_16,
-        CAN_DLC_20,
-        CAN_DLC_24,
-        CAN_DLC_32,
-        CAN_DLC_48,
-        CAN_DLC_64
-    };
 
     //! CAN TX Message Object Control
 
@@ -1298,9 +1253,9 @@ namespace MCP2518
 
     public enum CAN_SYSCLK_SPEED
     {
-        CAN_SYSCLK_40M = MCP_CLOCK_T.MCP2518FD_40MHz,
-        CAN_SYSCLK_20M = MCP_CLOCK_T.MCP2518FD_20MHz,
-        CAN_SYSCLK_10M = MCP_CLOCK_T.MCP2518FD_10MHz,
+        CAN_SYSCLK_40M = MCPCanInterface.MCP_CLOCK.MCP2518FD_40MHz,
+        CAN_SYSCLK_20M = MCPCanInterface.MCP_CLOCK.MCP2518FD_20MHz,
+        CAN_SYSCLK_10M = MCPCanInterface.MCP_CLOCK.MCP2518FD_10MHz,
     };
 
     //! CLKO Divide
@@ -1363,7 +1318,7 @@ namespace MCP2518
             public uint TxBandWidthSharing;
         }
 
-        public bFrame bF;
+        public bFrame bF = new();
 
         public uint word;
 

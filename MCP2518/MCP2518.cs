@@ -4,72 +4,20 @@ using System;
 using System.Collections;
 using System.Text;
 using System.Threading;
+using MCP2518;
 
 namespace MCP2518
 {
-    internal class MCP2518
+    public class MCP2518 : MCPCanInterface
     {
-        public bool __flgFDF = false;
+        #region Defines
+        public int CRCBASE = 0xFFFF;
+        public int CRCUPPER = 1;
 
-        public const byte CAN_OK = 0;
-        public const byte CAN_FAILINIT = 1;
-        public const byte CAN_FAILTX = 2;
-        public const byte CAN_MSGAVAIL = 3;
-        public const byte CAN_NOMSG = 4;
-        public const byte CAN_CTRLERROR = 5;
-        public const byte CAN_GETTXBFTIMEOUT = 6;
-        public const byte CAN_SENDMSGTIMEOUT = 7;
-        public const byte CAN_FAIL = 0xff;
-        uint mSysClock;   // PLL disabled, mSysClock = Oscillator Frequency
-        uint mDesiredArbitrationBitRate; // desired ArbitrationBitRate
-        byte mDataBitRateFactor; // multiplier between ArbitrationBitRate and DataBitrate
-                                 //--- Data bit rate; if mDataBitRateFactor==1, theses properties are not used for configuring the MCP2517FD.
-        byte mDataPhaseSegment1 = 0; // if mDataBitRateFactor > 1: 2...32, else equal to mArbitrationPhaseSegment1
-        byte mDataPhaseSegment2 = 0; // if mDataBitRateFactor > 1: 1...16, else equal to mArbitrationPhaseSegment2
-        byte mDataSJW = 0; // if mDataBitRateFactor > 1: 1...16, else equal to mArbitrationSJW
-                           //--- Bit rate prescaler is common to arbitration and data bit rates
-        ushort mBitRatePrescaler = 0; // 1...256
-                                      //--- Arbitration bit rate
-        ushort mArbitrationPhaseSegment1 = 0; // 2...256
-        byte mArbitrationPhaseSegment2 = 0; // 1...128
-        byte mArbitrationSJW = 0; // 1...128
-        bool mArbitrationBitRateClosedToDesiredRate = false; // The above configuration is not correct
-                                                             //--- Transmitter Delay Compensation Offset
-        sbyte mTDCO = 0; // -64 ... +63
-
-        byte nReservedTx;     // Count of tx buffers for reserved send
-        CAN_OPERATION_MODE mcpMode = CAN_OPERATION_MODE.CAN_CLASSIC_MODE; // Current controller mode
-        byte ext_flg; // identifier xxxID
-                      // either extended (the 29 LSB) or standard (the 11 LSB)
-        ulong can_id; // can id
-        byte rtr;     // is remote frame
-        byte SPICS;
-
-        static CAN_CONFIG config = new CAN_CONFIG();
-
-        // Receive objects
-        static CAN_RX_FIFO_CONFIG rxConfig = new CAN_RX_FIFO_CONFIG();
-        static REG_CiFLTOBJ fObj = new REG_CiFLTOBJ();
-        static REG_CiMASK mObj = new REG_CiMASK();
-        static CAN_RX_FIFO_EVENT rxFlags;
-        public static CAN_RX_MSGOBJ rxObj = new CAN_RX_MSGOBJ();
-        static byte[] rxd = new byte[MCP2518_Registers.MAX_DATA_BYTES];
-
-        // Transmit objects
-        static CAN_TX_FIFO_CONFIG txConfig = new CAN_TX_FIFO_CONFIG();
-        static CAN_TX_FIFO_EVENT txFlags = new CAN_TX_FIFO_EVENT();
-        public static CAN_TX_MSGOBJ txObj;
-        static byte[] txd = new byte[MCP2518_Registers.MAX_DATA_BYTES];
-
-        CAN_FIFO_CHANNEL APP_TX_FIFO = CAN_FIFO_CHANNEL.CAN_FIFO_CH2;
-        CAN_FIFO_CHANNEL APP_RX_FIFO = CAN_FIFO_CHANNEL.CAN_FIFO_CH1;
-
-
-        ushort CRCBASE = 0xFFFF;
-        ushort CRCUPPER = 1;
+        public int SPI_DEFAULT_BUFFER_LENGTH = 96;
 
         //! Reverse order of bits in byte
-        static byte[] BitReverseTable256 = {
+        public byte[] BitReverseTable256 = {
             0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0,
             0x30, 0xB0, 0x70, 0xF0, 0x08, 0x88, 0x48, 0xC8, 0x28, 0xA8, 0x68, 0xE8,
             0x18, 0x98, 0x58, 0xD8, 0x38, 0xB8, 0x78, 0xF8, 0x04, 0x84, 0x44, 0xC4,
@@ -91,10 +39,10 @@ namespace MCP2518
             0x1B, 0x9B, 0x5B, 0xDB, 0x3B, 0xBB, 0x7B, 0xFB, 0x07, 0x87, 0x47, 0xC7,
             0x27, 0xA7, 0x67, 0xE7, 0x17, 0x97, 0x57, 0xD7, 0x37, 0xB7, 0x77, 0xF7,
             0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF,
-        0x3F, 0xBF, 0x7F, 0xFF};
+            0x3F, 0xBF, 0x7F, 0xFF};
 
         //! Look-up table for CRC calculation
-        static ushort[] crc16_table = {
+        public ushort[] crc16_table = {
             0x0000, 0x8005, 0x800F, 0x000A, 0x801B, 0x001E, 0x0014, 0x8011, 0x8033,
             0x0036, 0x003C, 0x8039, 0x0028, 0x802D, 0x8027, 0x0022, 0x8063, 0x0066,
             0x006C, 0x8069, 0x0078, 0x807D, 0x8077, 0x0072, 0x0050, 0x8055, 0x805F,
@@ -123,406 +71,328 @@ namespace MCP2518
             0x0246, 0x024C, 0x8249, 0x0258, 0x825D, 0x8257, 0x0252, 0x0270, 0x8275,
             0x827F, 0x027A, 0x826B, 0x026E, 0x0264, 0x8261, 0x0220, 0x8225, 0x822F,
             0x022A, 0x823B, 0x023E, 0x0234, 0x8231, 0x8213, 0x0216, 0x021C, 0x8219,
-        0x0208, 0x820D, 0x8207, 0x0202};
+            0x0208, 0x820D, 0x8207, 0x0202};
 
-        GpioPin cs;
-        SpiConnectionSettings settings;
-        SpiController controller;
-        SpiDevice spi;
 
-        uint MAX_TXQUEUE_ATTEMPTS = 50;
+        #endregion
 
-        public MCP2518(GpioPin cs, SpiConnectionSettings settings, SpiController controller)
-        {
-            this.cs = cs;
-            this.settings = settings;
-            this.controller = controller;
+        #region Private Vars
 
-            spi = controller.GetDevice(settings);
-        }
+        byte nReservedTx;     // Count of tx buffers for reserved send
+        CAN_OPERATION_MODE mcpMode = CAN_OPERATION_MODE.CAN_CLASSIC_MODE; // Current controller mode
 
-        // *****************************************************************************
-        // *****************************************************************************
-        // Section: Variables
+        uint mSysClock;   // PLL disabled, mSysClock = Oscillator Frequency
+        uint mDesiredArbitrationBitRate; // desired ArbitrationBitRate
+        byte mDataBitRateFactor; // multiplier between ArbitrationBitRate and DataBitrate
+        //--- Data bit rate; if mDataBitRateFactor==1, theses properties are not used for configuring the MCP2517FD.
+        byte mDataPhaseSegment1 = 0; // if mDataBitRateFactor > 1: 2...32, else equal to mArbitrationPhaseSegment1
+        byte mDataPhaseSegment2 = 0; // if mDataBitRateFactor > 1: 1...16, else equal to mArbitrationPhaseSegment2
+        byte mDataSJW = 0; // if mDataBitRateFactor > 1: 1...16, else equal to mArbitrationSJW
+        //--- Bit rate prescaler is common to arbitration and data bit rates
+        ushort mBitRatePrescaler = 0; // 1...256
+        //--- Arbitration bit rate
+        ushort mArbitrationPhaseSegment1 = 0; // 2...256
+        byte mArbitrationPhaseSegment2 = 0; // 1...128
+        byte mArbitrationSJW = 0; // 1...128
+        bool mArbitrationBitRateClosedToDesiredRate = false; // The above configuration is not correct
+        //--- Transmitter Delay Compensation Offset
+        sbyte mTDCO = 0; // -64 ... +63
 
-        static int SPI_DEFAULT_BUFFER_LENGTH = 96;
 
         //! SPI Transmit buffer
-        byte[] spiTransmitBuffer = new byte[SPI_DEFAULT_BUFFER_LENGTH + 2];
+        static byte[] spiTransmitBuffer = new byte[98];
 
         //! SPI Receive buffer
-        byte[] spiReceiveBuffer = new byte[SPI_DEFAULT_BUFFER_LENGTH];
+        static byte[] spiReceiveBuffer = new byte[96];
 
-        ushort CalculateCRC16(byte[] data, ushort size)
+        #endregion
+
+        #region Tx/Rx objects
+
+        static CAN_CONFIG config = new();
+
+        // Receive objects
+        private static CAN_RX_FIFO_CONFIG rxConfig = new();
+        private static REG_CiFLTOBJ fObj = new();
+        private static REG_CiMASK mObj = new();
+        private static CAN_RX_FIFO_EVENT rxFlags;
+        private static CAN_RX_MSGOBJ rxObj = new();
+        private static byte[] rxd = new byte[MCP2518Dfs.MAX_DATA_BYTES];
+
+        // Transmit objects
+        private static CAN_TX_FIFO_CONFIG txConfig = new();
+        private static CAN_TX_FIFO_EVENT txFlags = new();
+        private static CAN_TX_MSGOBJ txObj = new();
+        private static byte[] txd = new byte[MCP2518Dfs.MAX_DATA_BYTES];
+
+        private static int MAX_TXQUEUE_ATTEMPTS = 50;
+
+        // Transmit Channels
+        private CAN_FIFO_CHANNEL APP_TX_FIFO = CAN_FIFO_CHANNEL.CAN_FIFO_CH2;
+
+        // Receive Channels
+        private CAN_FIFO_CHANNEL APP_RX_FIFO = CAN_FIFO_CHANNEL.CAN_FIFO_CH1;
+
+        #endregion
+
+        private ushort DRV_CANFDSPI_CalculateCRC16(byte[] data, ushort size)
         {
-            ushort init = CRCBASE;
-            byte index;
+            ushort init = 0xFFFF;
+            int index;
 
             for (int i = 0; i < size; i++)
             {
-                index = (byte)((init >> 8) ^ data[i]);
-                init = (ushort)(((init << 8) ^ crc16_table[index]) & CRCBASE);
+                index = (init >> 8) ^ data[i];
+                init = (ushort)(((init << 8) ^ crc16_table[index]) & 0xFFFF);
             }
 
             return init;
         }
 
-        int Reset()
+        public MCP2518(SpiDevice spi)
         {
-            int spiTransferError = 0;
-            spiTransmitBuffer[0] = (byte)(MCP2518_Registers.cINSTRUCTION_RESET << 4);
+            this.spi = spi;
+        }
+        public override byte Begin(MCP_BITTIME_SETUP speedSet, MCP_CLOCK clockSet)
+        {
+            throw new NotImplementedException();
+        }
+
+        private byte Reset()
+        {
+            byte spiTransferError = 0;
+
+            spiTransmitBuffer[0] = (byte)(cINSTRUCTION_RESET << 4);
             spiTransmitBuffer[1] = 0;
 
-            try
-            {
-                spi.Write(spiTransmitBuffer, 0, 2);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            Thread.Sleep(10);
 
             return spiTransferError;
         }
 
-        /*********************************************************************************************************
-** Function name:           begin
-** Descriptions:            init can and set speed
-*********************************************************************************************************/
-        public byte Begin(uint speedset, CAN_SYSCLK_SPEED clockset = (CAN_SYSCLK_SPEED)MCP_CLOCK_T.MCP2518FD_20MHz)
+        private byte ReadByte(ushort address, out byte rxd)
         {
-            /* compatible layer translation */
-            speedset = Bittime_compat_to_mcp2518fd(speedset);
-            if (speedset > (uint)MCP_BITTIME_SETUP.CAN20_1000KBPS) __flgFDF = true;
-            byte res = Init(speedset, clockset);
-            return res;
-        }
+            byte spiTransferError = 0;
 
-        byte ReadByte(ushort address)
-        {
-            int spiTransferError = 0;
-            byte[] spiTransmitBuffer = { (byte)((MCP2518_Registers.cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF)), (byte)(address & 0xFF), 0 };
+            // Compose command
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[1] = (byte)(address & 0xFF);
 
-            try
-            {
-                spi.TransferFullDuplex(spiTransmitBuffer, spiReceiveBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode(); ;
-            }
+            spi.TransferSequential(spiTransmitBuffer, 0, 2, spiReceiveBuffer, 0, 1);
 
-            byte rxd = spiReceiveBuffer[2];
-
-            return rxd;
-        }
-
-        int WriteByte(ushort address, byte txd)
-        {
-            int spiTransferError = 0;
-            byte[] spiTransmitBuffer =
-            {
-                (byte)((MCP2518_Registers.cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF)),
-                (byte)(address & 0xFF),
-                txd
-            };
-
-            try
-            {
-                spi.Write(spiTransmitBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            rxd = spiReceiveBuffer[0];
 
             return spiTransferError;
-
-
         }
 
-        uint ReadWord(ushort address)
+        private byte WriteByte(ushort address, byte txd)
         {
-            int spiTransferError = 0;
-            byte[] spiTransmitBuffer =
-            {
-                (byte)((MCP2518_Registers.cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF)),
-                (byte)(address & 0xFF)
-            };
+            byte spiTransferError = 0;
 
-            try
-            {
-                spi.TransferFullDuplex(spiTransmitBuffer, spiReceiveBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            //compose command
+            // Compose command
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[1] = (byte)(address & 0xFF);
+            spiTransmitBuffer[2] = txd;
 
-            uint rxd = 0;
-            uint x = 0;
-            for (int i = 2; i < 6; i++)
+            spi.Write(spiTransmitBuffer, 0, 3);
+
+            return spiTransferError;
+        }
+
+        private byte ReadWord(ushort address, out uint rxd)
+        {
+            uint x;
+            byte spiTransferError = 0;
+
+            // Compose command
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[1] = (byte)(address & 0xFF);
+
+            spi.TransferSequential(spiTransmitBuffer, 0, 2, spiReceiveBuffer, 0, 4);
+
+            rxd = 0;
+            for (int i = 0; i < 4; i++)
             {
                 x = spiReceiveBuffer[i];
-                rxd += x << ((i - 2) * 8);
+                rxd += x << (i * 8);
             }
 
-            return rxd;
+            return spiTransferError;
         }
 
-        int WriteWord(ushort address, uint txd)
+        private byte WriteWord(ushort address, uint txd)
         {
-            byte[] spiTransmitBuffer = new byte[6];
-            int spiTransferError = 0;
+            byte spiTransferError = 0;
 
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
+            // Compose command
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
             spiTransmitBuffer[1] = (byte)(address & 0xFF);
 
             for (int i = 0; i < 4; i++)
             {
-                spiTransmitBuffer[i + 2] = (byte)((txd >> (i * 8)) & 0xFF);
+                spiTransmitBuffer[i+2] = (byte)((txd >> (i * 8)) & 0xFF);
             }
 
-            try
-            {
-                spi.Write(spiTransmitBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.Write(spiTransmitBuffer, 0, 6);
 
             return spiTransferError;
         }
 
-        ushort ReadHalfWord(ushort address)
+        private byte ReadHalfWord(ushort address, out ushort rxd)
         {
-            int spiTransferError = 0;
-            byte[] spiTransmitBuffer =
-            {
-                (byte)((MCP2518_Registers.cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF)),
-                (byte)(address & 0xFF)
-            };
+            byte spiTransferError = 0;
 
-            try
-            {
-                spi.TransferFullDuplex(spiTransmitBuffer, spiReceiveBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            uint x;
 
-
-            uint x = 0;
-            ushort rxd = 0;
-            for (int i = 2; i < 4; i++)
-            {
-                x = spiReceiveBuffer[i];
-                rxd += (ushort)(x << ((i - 2) * 8));
-            }
-
-            return rxd;
-        }
-
-        int WriteHalfWord(ushort address, ushort txd)
-        {
-            int spiTransferError = 0;
-            byte[] spiTransmitBuffer = new byte[4];
-
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
+            // Compose command
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF));
             spiTransmitBuffer[1] = (byte)(address & 0xFF);
+
+            spi.TransferSequential(spiTransmitBuffer, 0, 2, spiReceiveBuffer, 0, 2);
+
+            rxd = 0;
 
             for (int i = 0; i < 2; i++)
             {
-                spiTransmitBuffer[i + 2] = (byte)((txd >> (i * 8)) & 0xFF);
-            }
-
-            try
-            {
-                spi.Write(spiTransmitBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
+                x = spiReceiveBuffer[i];
+                rxd += (ushort)(x << (i * 8));
             }
 
             return spiTransferError;
         }
 
-        int ReadByteArray(ushort address, byte[] rxd, ushort nBytes)
+        private byte ReadByteArray(ushort address, byte[] rxd, ushort nBytes)
         {
-            int spiTransferError = 0;
-            ushort i;
             ushort spiTransferSize = (ushort)(nBytes + 2);
+            byte spiTransferError = 0;
 
-            byte[] spiTransmitBuffer = new byte[spiTransferSize];
             // Compose command
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF));
             spiTransmitBuffer[1] = (byte)(address & 0xFF);
 
             // Clear data
-            for (i = 2; i < spiTransferSize; i++)
+            for (int i = 2; i < spiTransferSize; i++)
             {
                 spiTransmitBuffer[i] = 0;
             }
 
-            try
-            {
-                spi.TransferFullDuplex(spiTransmitBuffer, spiReceiveBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.TransferSequential(spiTransmitBuffer, 0, 2, spiReceiveBuffer, 0, nBytes);
 
-            // Update data
-            for (i = 0; i < nBytes; i++)
+            for (int i = 0; i < nBytes; i++)
             {
-                rxd[i] = spiReceiveBuffer[i + 2];
+                rxd[i] = spiReceiveBuffer[i];
             }
 
             return spiTransferError;
         }
 
-        int WriteByteArray(ushort address, byte[] txd, ushort nBytes)
+        private byte WriteByteArray(ushort address, byte[] txd, ushort nBytes)
         {
-            int spiTransferError = 0;
-            ushort i;
             ushort spiTransferSize = (ushort)(nBytes + 2);
-
-            byte[] spiTransmitBuffer = new byte[spiTransferSize];
+            byte spiTransferError = 0;
 
             // Compose command
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
             spiTransmitBuffer[1] = (byte)(address & 0xFF);
-
             // Add data
-            for (i = 2; i < spiTransferSize; i++)
+            for (int i = 2; i < spiTransferSize; i++)
             {
                 spiTransmitBuffer[i] = txd[i - 2];
             }
 
-            try
-            {
-                spi.Write(spiTransmitBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.Write(spiReceiveBuffer, 0, spiTransferSize);
 
             return spiTransferError;
         }
 
-        int WriteByteSafe(ushort address, byte txd)
+        private byte WriteByteSafe(ushort address, byte txd)
         {
-            int spiTransferError = 0;
             ushort crcResult = 0;
-            byte[] spiTransmitBuffer = new byte[5];
+            byte spiTransferError = 0;
 
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_WRITE_SAFE << 4) + ((address >> 8) & 0xF));
-            spiTransmitBuffer[1] = ((byte)(address & 0xFF));
+            // Compose command
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_WRITE_SAFE << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[1] = (byte)(address & 0xFF);
             spiTransmitBuffer[2] = txd;
 
-            crcResult = CalculateCRC16(spiTransmitBuffer, 3);
+            crcResult = DRV_CANFDSPI_CalculateCRC16(spiTransmitBuffer, 3);
             spiTransmitBuffer[3] = (byte)((crcResult >> 8) & 0xFF);
             spiTransmitBuffer[4] = (byte)(crcResult & 0xFF);
 
-            try
-            {
-                spi.Write(spiTransmitBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.Write(spiTransmitBuffer, 0, 5);
 
             return spiTransferError;
         }
 
-        int WriteWordSafe(ushort address, uint txd)
+        private byte WriteWordSafe(ushort address, uint txd)
         {
-            int spiTransferError = 0;
             ushort crcResult = 0;
-            byte[] spiTransmitBuffer = new byte[8];
+            byte spiTransferError = 0;
 
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_WRITE_SAFE << 4) + ((address >> 8) & 0xF));
-            spiTransmitBuffer[1] = (byte)(crcResult & 0xFF);
+            // Compose command
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_WRITE_SAFE << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[1] = (byte)(address & 0xFF);
 
+            // Split word into 4 bytes and add them to buffer
             for (int i = 0; i < 4; i++)
             {
                 spiTransmitBuffer[i + 2] = (byte)((txd >> (i * 8)) & 0xFF);
             }
 
-            crcResult = CalculateCRC16(spiTransmitBuffer, 6);
+            // Add CRC
+            crcResult = DRV_CANFDSPI_CalculateCRC16(spiTransmitBuffer, 6);
             spiTransmitBuffer[6] = (byte)((crcResult >> 8) & 0xFF);
             spiTransmitBuffer[7] = (byte)(crcResult & 0xFF);
 
-            try
-            {
-                spi.Write(spiTransmitBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.Write(spiTransmitBuffer, 0, 8);
 
             return spiTransferError;
         }
 
-
-        ByteArrayCRC ReadByteArrayWithCRC(ushort address, ushort nBytes, bool fromRam)
+        private byte ReadByteArrayWithCRC(ushort address, byte[] rxd, ushort nBytes, bool fromRam, out bool crcIsCorrect)
         {
-            byte i;
-            ushort crcFromSpiSlave = 0;
+            ushort crcFromSpiSalve = 0;
             ushort crcAtController = 0;
-            int spiTransferError = 0;
-            ushort spiTransferSize = (ushort)(nBytes + 5); //first two bytes for sending command & address, third for size, last two bytes for CRC
+            ushort spiTransferSize = (ushort)(nBytes + 5); // first two bytes for sending command & address, third for
+            // size, last two bytes for CRC
 
-            byte[] spiTransmitBuffer = new byte[spiTransferSize];
+            byte spiTransferError = 0;
+
             // Compose command
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_READ_CRC << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_READ_CRC << 4) + ((address >> 8) & 0xF));
             spiTransmitBuffer[1] = (byte)(address & 0xFF);
-
-            if (fromRam)
-            {
-                spiTransmitBuffer[2] = (byte)(nBytes >> 2);
-            }
-            else
-            {
-                spiTransmitBuffer[2] = (byte)nBytes;
-            }
+            spiTransmitBuffer[2] = fromRam ? (byte)(nBytes >> 2) : (byte)nBytes;
 
             // Clear data
-            for (i = 3; i < spiTransferSize; i++)
+            for (int i = 3; i < nBytes + 2; i++)
             {
-                spiTransmitBuffer[i] = 0;
+                spiTransmitBuffer[i + 3] = 0;
             }
 
-            try
-            {
-                spi.TransferFullDuplex(spiTransmitBuffer, spiReceiveBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.TransferSequential(spiTransmitBuffer, 0, 3, spiReceiveBuffer, 0, spiTransferSize - 3);
 
             // Get CRC from controller
-            crcFromSpiSlave = (ushort)((spiReceiveBuffer[spiTransferSize - 2] << 8) + (spiReceiveBuffer[spiTransferSize - 1]));
+            crcFromSpiSalve = (ushort)((spiReceiveBuffer[nBytes + 2 ] << 8) + (spiReceiveBuffer[nBytes + 1]));
 
             // Use the receive buffer to calculate CRC
             // First three bytes need to be command
             spiReceiveBuffer[0] = spiTransmitBuffer[0];
             spiReceiveBuffer[1] = spiTransmitBuffer[1];
             spiReceiveBuffer[2] = spiTransmitBuffer[2];
-            crcAtController = CalculateCRC16(spiReceiveBuffer, (ushort)(nBytes + 3));
+            crcAtController = DRV_CANFDSPI_CalculateCRC16(spiReceiveBuffer, (ushort)(nBytes + 3));
 
-            bool crcIsCorrect;
-
-            // Compare CRC readings
-            if (crcFromSpiSlave != crcAtController)
+            if (crcFromSpiSalve == crcAtController)
             {
                 crcIsCorrect = true;
             }
@@ -531,101 +401,67 @@ namespace MCP2518
                 crcIsCorrect = false;
             }
 
-            byte[] rxd = new byte[nBytes];
-            // Update data
-            for (i = 0; i < nBytes; i++)
+            for (int i = 0; i < nBytes; i++)
             {
-                rxd[i] = spiReceiveBuffer[i + 3];
+                rxd[i] = spiReceiveBuffer[i];
             }
 
-            ByteArrayCRC res = new ByteArrayCRC();
-            res.crcIsCorrect = crcIsCorrect;
-            res.rxd = rxd;
 
-            return res;
+            return spiTransferError;
         }
-        int WriteByteArrayWithCRC(ushort address,
-                byte[] txd, ushort nBytes, bool fromRam)
+
+        private byte WriteByteArrayWithCRC(ushort address, byte[] txd, ushort nBytes, bool fromRam)
         {
-            int spiTransferError = 0;
-            ushort i;
             ushort crcResult = 0;
             ushort spiTransferSize = (ushort)(nBytes + 5);
-
-            byte[] spiTransmitBuffer = new byte[spiTransferSize];
+            byte spiTransferError = 0;
 
             // Compose command
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_WRITE_CRC << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[0] =
+                (byte)((cINSTRUCTION_WRITE_CRC << 4) + ((address >> 8) & 0xF));
             spiTransmitBuffer[1] = (byte)(address & 0xFF);
-            if (fromRam)
-            {
-                spiTransmitBuffer[2] = (byte)(nBytes >> 2);
-            }
-            else
-            {
-                spiTransmitBuffer[2] = (byte)nBytes;
-            }
+            spiTransmitBuffer[2] = fromRam ? (byte)(nBytes >> 2) : (byte)nBytes;
 
             // Add data
-            for (i = 0; i < nBytes; i++)
+            for (int i = 0; i < nBytes; i++)
             {
                 spiTransmitBuffer[i + 3] = txd[i];
             }
 
             // Add CRC
-            crcResult = CalculateCRC16(spiTransmitBuffer, (ushort)(spiTransferSize - 2));
+            crcResult = DRV_CANFDSPI_CalculateCRC16(spiTransmitBuffer, (ushort)(spiTransferSize - 2));
             spiTransmitBuffer[spiTransferSize - 2] = (byte)((crcResult >> 8) & 0xFF);
             spiTransmitBuffer[spiTransferSize - 1] = (byte)(crcResult & 0xFF);
 
-            try
-            {
-                spi.Write(spiTransmitBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.Write(spiTransmitBuffer, 0, spiTransferSize - 1);
 
             return spiTransferError;
         }
 
-        int ReadWordArray(ushort address, uint[] rxd, ushort nWords)
+        private byte ReadWordArray(ushort address, uint[] rxd, ushort nWords)
         {
-            int spiTransferError = 0;
-            ushort i, j, n;
-            REG_t w = new REG_t();
-            w.bytes = new byte[4];
-            w.UpdateFromBytes();
-
+            REG_t w = new();
             ushort spiTransferSize = (ushort)(nWords * 4 + 2);
-
-            byte[] spiTransmitBuffer = new byte[spiTransferSize];
+            byte spiTransferError = 0;
 
             // Compose command
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[0] = (byte)((cINSTRUCTION_READ << 4) + ((address >> 8) & 0xF));
             spiTransmitBuffer[1] = (byte)(address & 0xFF);
 
             // Clear data
-            for (i = 2; i < spiTransferSize; i++)
+            for (int i = 2; i < spiTransferSize; i++)
             {
                 spiTransmitBuffer[i] = 0;
             }
 
-            try
-            {
-                spi.TransferFullDuplex(spiTransmitBuffer, spiReceiveBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.TransferSequential(spiTransmitBuffer, 0, 2, spiReceiveBuffer, 0, spiTransferSize - 2);
 
-            // Convert Byte array to Word array
-            n = 2;
-            for (i = 0; i < nWords; i++)
+            int n = 2;
+            for (int i = 0; i < nWords; i++)
             {
                 w.word = 0;
-                for (j = 0; j < 4; j++, n++)
+                w.UpdateFromWord();
+                for (int j = 0; j < 4; j++, n++)
                 {
                     w.bytes[j] = spiReceiveBuffer[n];
                 }
@@ -636,100 +472,81 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        int WriteWordArray(ushort address,
-                uint[] txd, ushort nWords)
+        private byte WriteWordArray(ushort address, uint[] txd, ushort nWords)
         {
-            int spiTransferError = 0;
-            ushort i, j, n;
-            REG_t w = new REG_t();
-            w.bytes = new byte[nWords * 4];
-            w.UpdateFromBytes();
-
+            REG_t w = new();
             ushort spiTransferSize = (ushort)(nWords * 4 + 2);
-
-            byte[] spiTransmitBuffer = new byte[spiTransferSize];
+            byte spiTransferError = 0;
 
             // Compose command
-            spiTransmitBuffer[0] = (byte)((MCP2518_Registers.cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[0] = (byte)((cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
             spiTransmitBuffer[1] = (byte)(address & 0xFF);
 
-            // Convert ByteArray to word array
-            n = 2;
-            for (i = 0; i < nWords; i++)
+            int n = 2;
+            for (int i = 0; n < nWords; i++)
             {
                 w.word = txd[i];
                 w.UpdateFromWord();
-                for (j = 0; j < 4; j++, n++)
+                for (int j = 0; j < 4; j++, n++)
                 {
                     spiTransmitBuffer[n] = w.bytes[j];
                 }
             }
 
-            try
-            {
-                spi.Write(spiTransmitBuffer);
-            }
-            catch (Exception e)
-            {
-                spiTransferError = e.GetHashCode();
-            }
+            spi.Write(spiTransmitBuffer, 0, spiTransferSize);
 
             return spiTransferError;
         }
 
-        int EccEnable()
+        private byte EccEnable()
         {
+            byte spiTranferError = 0;
             byte d = 0;
-            int spiTransferError = 0;
 
             // Read
-            d = ReadByte(MCP2518_Registers.cREGADDR_ECCCON);
+            spiTranferError = ReadByte(MCP2518Dfs.cREGADDR_ECCCON, out d);
+            if (spiTranferError > 0)
+            {
+                return -1;
+            }
+
             // Modify
             d |= 0x01;
 
-            // Write
-            spiTransferError = WriteByte(MCP2518_Registers.cREGADDR_ECCCON, d);
-            if (spiTransferError > 0)
-            {
-                return -2;
-            }
+            //Write
+            spiTranferError = WriteByte(MCP2518Dfs.cREGADDR_ECCCON, d);
 
-            return spiTransferError;
+            return spiTranferError;
         }
 
-        int RamInit(byte d)
+        private byte RamInit(byte d)
         {
-            byte[] txd = new byte[SPI_DEFAULT_BUFFER_LENGTH];
+            byte[] txd = new byte[96];
             uint k;
-            int spiTransferError = 0;
+            byte spiTransferError = 0;
 
             // Prepare data
-            for (k = 0; k < SPI_DEFAULT_BUFFER_LENGTH; k++)
+            for (k = 0; k < 96; k++)
             {
                 txd[k] = d;
             }
 
-            ushort a = MCP2518_Registers.cRAMADDR_START;
+            ushort a = MCP2518Dfs.cRAMADDR_START;
 
-            for (k = 0; k < (MCP2518_Registers.cRAM_SIZE / SPI_DEFAULT_BUFFER_LENGTH); k++)
+            for (k = 0; k < (MCP2518Dfs.cRAM_SIZE / SPI_DEFAULT_BUFFER_LENGTH); k++)
             {
-                spiTransferError = WriteByteArray(a, txd, (ushort)SPI_DEFAULT_BUFFER_LENGTH);
-                if (spiTransferError > 0)
-                {
-                    return -1;
-                }
-
+                WriteByteArray(a, txd, (ushort)SPI_DEFAULT_BUFFER_LENGTH);
                 a += (ushort)SPI_DEFAULT_BUFFER_LENGTH;
             }
 
             return spiTransferError;
         }
 
-        void ConfigureObjectReset(CAN_CONFIG config)
+        private void ConfigureObjectReset(CAN_CONFIG config)
         {
             REG_CiCON ciCon = new REG_CiCON();
-            ciCon.word = MCP2518_Registers.canControlResetValues[MCP2518_Registers.cREGADDR_CiCON / 4];
-            ciCon.UpdateFromWord();
+            ciCon.word = MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiCON / 4];
+            ciCon.UpdateFromBytes();
 
             config.DNetFilterCount = ciCon.bF.DNetFilterCount;
             config.IsoCrcEnable = ciCon.bF.IsoCrcEnable;
@@ -745,11 +562,11 @@ namespace MCP2518
             config.TxBandWidthSharing = ciCon.bF.TxBandWidthSharing;
         }
 
-        void Configure(CAN_CONFIG config)
+        private void Configure(CAN_CONFIG config)
         {
-            REG_CiCON ciCon = new REG_CiCON();
+            REG_CiCON ciCon = new();
 
-            ciCon.word = MCP2518_Registers.canControlResetValues[MCP2518_Registers.cREGADDR_CiCON / 4];
+            ciCon.word = MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiCON / 4];
             ciCon.UpdateFromWord();
 
             ciCon.bF.DNetFilterCount = config.DNetFilterCount;
@@ -764,16 +581,16 @@ namespace MCP2518
             ciCon.bF.StoreInTEF = config.StoreInTEF;
             ciCon.bF.TXQEnable = config.TXQEnable;
             ciCon.bF.TxBandWidthSharing = config.TxBandWidthSharing;
-
             ciCon.UpdateFromReg();
 
-            WriteWord(MCP2518_Registers.cREGADDR_CiCON, ciCon.word);
+            WriteWord(MCP2518Dfs.cREGADDR_CiCON, ciCon.word);
+
         }
 
-        int TransmitChannelConfigureObjectReset(CAN_TX_FIFO_CONFIG config)
+        private void TransmitChannelConfigureObjectReset(CAN_TX_FIFO_CONFIG config)
         {
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            ciFifoCon.word = MCP2518_Registers.canFifoResetValues[0];
+            REG_CiFIFOCON ciFifoCon = new ();
+            ciFifoCon.word = MCP2518Dfs.canFifoResetValues[0]; // 10010010100101010000
             ciFifoCon.UpdateFromWord();
 
             config.RTREnable = ciFifoCon.txBF.RTREnable;
@@ -781,18 +598,15 @@ namespace MCP2518
             config.TxAttempts = ciFifoCon.txBF.TxAttempts;
             config.FifoSize = ciFifoCon.txBF.FifoSize;
             config.PayLoadSize = ciFifoCon.txBF.PayLoadSize;
-
-            return 0;
         }
 
-        int TransmitChannelConfigure(CAN_FIFO_CHANNEL channel,
-        CAN_TX_FIFO_CONFIG config)
+        private void TransmitChannelConfigure(CAN_FIFO_CHANNEL channel, CAN_TX_FIFO_CONFIG config)
         {
-            int spiTransferError = 0;
             ushort a = 0;
+
             // Setup FIFO
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            ciFifoCon.word = MCP2518_Registers.canFifoResetValues[0];
+            REG_CiFIFOCON ciFifoCon = new();
+            ciFifoCon.word = MCP2518Dfs.canFifoResetValues[0];
             ciFifoCon.UpdateFromWord();
 
             ciFifoCon.txBF.TxEnable = 1;
@@ -801,1836 +615,116 @@ namespace MCP2518
             ciFifoCon.txBF.TxAttempts = config.TxAttempts;
             ciFifoCon.txBF.TxPriority = config.TxPriority;
             ciFifoCon.txBF.RTREnable = config.RTREnable;
-            ciFifoCon.UpdateFromTxReg();
-
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOCON + ((int)channel * MCP2518_Registers.CiFIFO_OFFSET));
-
-            spiTransferError = WriteWord(a, ciFifoCon.word);
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            return spiTransferError;
-
-        }
-
-        void ReceiveChannelConfigureObjectReset(CAN_RX_FIFO_CONFIG config)
-        {
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            ciFifoCon.word = MCP2518_Registers.canFifoResetValues[0];
-            ciFifoCon.UpdateFromWord();
-
-            config.FifoSize = ciFifoCon.rxBF.FifoSize;
-            config.PayLoadSize = ciFifoCon.rxBF.PayLoadSize;
-            config.RxTimeStampEnable = ciFifoCon.rxBF.RxTimeStampEnable;
-        }
-
-        int ReceiveChannelConfigure(CAN_FIFO_CHANNEL channel, CAN_RX_FIFO_CONFIG config)
-        {
-            int spiTransferError = 0;
-            ushort a = 0;
-
-            if (channel == (CAN_FIFO_CHANNEL)MCP2518_Registers.CAN_TXQUEUE_CH0)
-            {
-                return -1;
-            }
-
-            // Setup FIFO
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            ciFifoCon.word = MCP2518_Registers.canFifoResetValues[0];
-            ciFifoCon.UpdateFromWord();
-
-            ciFifoCon.rxBF.TxEnable = 0;
-            ciFifoCon.rxBF.FifoSize = config.FifoSize;
-            ciFifoCon.rxBF.PayLoadSize = config.PayLoadSize;
-            ciFifoCon.rxBF.RxTimeStampEnable = config.RxTimeStampEnable;
-            ciFifoCon.UpdateFromRxReg();
-
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518_Registers.CiFIFO_OFFSET));
-
-            spiTransferError = WriteWord(a, ciFifoCon.word);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-        int FilterObjectConfigure(CAN_FILTER filter, CAN_FILTEROBJ_ID id)
-        {
-            int spiTransferError = 0;
-            ushort a;
-            REG_CiFLTOBJ fObj = new REG_CiFLTOBJ();
-
-            // Setup
-            fObj.word = 0;
-            fObj.bF = id;
-            fObj.UpdateFromReg();
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFLTOBJ + ((ushort)filter * MCP2518_Registers.CiFILTER_OFFSET));
-
-            spiTransferError = WriteWord(a, fObj.word);
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            return spiTransferError;
-        }
-
-        int FilterMaskConfigure(CAN_FILTER filter, CAN_MASKOBJ_ID mask)
-        {
-            int spiTransferError = 0;
-            ushort a;
-            REG_CiMASK mObj = new REG_CiMASK();
-
-            // Setup
-            mObj.word = 0;
-            mObj.bF = mask;
-            mObj.UpdateFromReg();
-
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiMASK + ((ushort)filter * MCP2518_Registers.CiFILTER_OFFSET));
-            spiTransferError = WriteWord(a, mObj.word);
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-            return spiTransferError;
-        }
-
-        int FilterToFifoLink(CAN_FILTER filter, CAN_FIFO_CHANNEL channel, bool enable)
-        {
-            int spiTransferError = 0;
-            ushort a;
-            REG_CiFLTCON_BYTE fCtrl = new REG_CiFLTCON_BYTE();
-
-            // Enable
-            fCtrl.bF.Enable = !enable ? (uint)1 : (uint)0;
-
-            // Link
-            fCtrl.bF.BufferPointer = (uint)channel;
-
-            fCtrl.UpdateFromReg();
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFLTCON + filter);         // 1D0
-
-            spiTransferError = WriteByte(a, fCtrl.single_byte);
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            return spiTransferError;
-        }
-
-
-        /*
-         * bittime calculation code from
-         *   https://github.com/pierremolinaro/acan2517FD
-         *
-         */
-
-        const ushort MAX_BRP = 256;
-        const ushort MAX_ARBITRATION_PHASE_SEGMENT_1 = 256;
-        const byte MAX_ARBITRATION_PHASE_SEGMENT_2 = 128;
-        const byte MAX_ARBITRATION_SJW = 128;
-        const ushort MAX_DATA_PHASE_SEGMENT_1 = 32;
-        const byte MAX_DATA_PHASE_SEGMENT_2 = 16;
-        const byte MAX_DATA_SJW = 16;
-
-        bool calcBittime(uint inDesiredArbitrationBitRate, uint inTolerancePPM = 1000)
-        {
-            if (mDataBitRateFactor <= 1)
-            { // Single bit rate
-                const uint maxTQCount = MAX_ARBITRATION_PHASE_SEGMENT_1 + MAX_ARBITRATION_PHASE_SEGMENT_2 + 1; // Setting for slowest bit rate
-                uint BRP = MAX_BRP;
-                uint smallestError = uint.MaxValue;
-                uint bestBRP = 1; // Setting for highest bit rate
-                uint bestTQCount = 4; // Setting for highest bit rate
-                uint TQCount = mSysClock / inDesiredArbitrationBitRate / BRP;
-                //--- Loop for finding best BRP and best TQCount
-                while ((TQCount <= (MAX_ARBITRATION_PHASE_SEGMENT_1 + MAX_ARBITRATION_PHASE_SEGMENT_2 + 1)) && (BRP > 0))
-                {
-                    //--- Compute error using TQCount
-                    if ((TQCount >= 4) && (TQCount <= maxTQCount))
-                    {
-                        uint error = mSysClock - inDesiredArbitrationBitRate * TQCount * BRP; // error is always >= 0
-                        if (error <= smallestError)
-                        {
-                            smallestError = error;
-                            bestBRP = BRP;
-                            bestTQCount = TQCount;
-                        }
-                    }
-                    //--- Compute error using TQCount+1
-                    if ((TQCount >= 3) && (TQCount < maxTQCount))
-                    {
-                        uint error = inDesiredArbitrationBitRate * (TQCount + 1) * BRP - mSysClock; // error is always >= 0
-                        if (error <= smallestError)
-                        {
-                            smallestError = error;
-                            bestBRP = BRP;
-                            bestTQCount = TQCount + 1;
-                        }
-                    }
-                    //--- Continue with next value of BRP
-                    BRP--;
-                    TQCount = (BRP == 0) ? (maxTQCount + 1) : (mSysClock / inDesiredArbitrationBitRate / BRP);
-                }
-                //--- Compute PS2 (1 <= PS2 <= 128)
-                uint PS2 = bestTQCount / 5; // For sampling point at 80%
-                if (PS2 == 0)
-                {
-                    PS2 = 1;
-                }
-                else if (PS2 > MAX_ARBITRATION_PHASE_SEGMENT_2)
-                {
-                    PS2 = MAX_ARBITRATION_PHASE_SEGMENT_2;
-                }
-                //--- Compute PS1 (1 <= PS1 <= 256)
-                uint PS1 = bestTQCount - PS2 - 1 /* Sync Seg */ ;
-                if (PS1 > MAX_ARBITRATION_PHASE_SEGMENT_1)
-                {
-                    PS2 += PS1 - MAX_ARBITRATION_PHASE_SEGMENT_1;
-                    PS1 = MAX_ARBITRATION_PHASE_SEGMENT_1;
-                }
-                //---
-                mBitRatePrescaler = (ushort)bestBRP;
-                mArbitrationPhaseSegment1 = (ushort)PS1;
-                mArbitrationPhaseSegment2 = (byte)PS2;
-                mArbitrationSJW = mArbitrationPhaseSegment2; // Always 1 <= SJW <= 128, and SJW <= mArbitrationPhaseSegment2
-                                                             //--- Final check of the nominal configuration
-                uint W = bestTQCount * inDesiredArbitrationBitRate * bestBRP;
-                ulong diff = (mSysClock > W) ? (mSysClock - W) : (W - mSysClock);
-                ulong ppm = (1000UL * 1000UL); // UL suffix is required for Arduino Uno
-                mArbitrationBitRateClosedToDesiredRate = (diff * ppm) <= (((ulong)W) * inTolerancePPM);
-            }
-            else
-            { // Dual bit rate, first compute data bit rate
-                uint maxDataTQCount = MAX_DATA_PHASE_SEGMENT_1 + MAX_DATA_PHASE_SEGMENT_2; // Setting for slowest bit rate
-                uint desiredDataBitRate = inDesiredArbitrationBitRate * mDataBitRateFactor;
-                uint smallestError = uint.MaxValue;
-                uint bestBRP = MAX_BRP; // Setting for lowest bit rate
-                uint bestDataTQCount = maxDataTQCount; // Setting for lowest bit rate
-                uint dataTQCount = 4;
-                uint brp = mSysClock / desiredDataBitRate / dataTQCount;
-                //--- Loop for finding best BRP and best TQCount
-                while ((dataTQCount <= maxDataTQCount) && (brp > 0))
-                {
-                    //--- Compute error using brp
-                    if (brp <= MAX_BRP)
-                    {
-                        uint error = mSysClock - desiredDataBitRate * dataTQCount * brp; // error is always >= 0
-                        if (error <= smallestError)
-                        {
-                            smallestError = error;
-                            bestBRP = brp;
-                            bestDataTQCount = dataTQCount;
-                        }
-                    }
-                    //--- Compute error using brp+1
-                    if (brp < MAX_BRP)
-                    {
-                        uint error = desiredDataBitRate * dataTQCount * (brp + 1) - mSysClock; // error is always >= 0
-                        if (error <= smallestError)
-                        {
-                            smallestError = error;
-                            bestBRP = brp + 1;
-                            bestDataTQCount = dataTQCount;
-                        }
-                    }
-                    //--- Continue with next value of BRP
-                    dataTQCount += 1;
-                    brp = mSysClock / desiredDataBitRate / dataTQCount;
-                }
-                //--- Compute data PS2 (1 <= PS2 <= 16)
-                uint dataPS2 = bestDataTQCount / 5; // For sampling point at 80%
-                if (dataPS2 == 0)
-                {
-                    dataPS2 = 1;
-                }
-                //--- Compute data PS1 (1 <= PS1 <= 32)
-                uint dataPS1 = bestDataTQCount - dataPS2 - 1 /* Sync Seg */ ;
-                if (dataPS1 > MAX_DATA_PHASE_SEGMENT_1)
-                {
-                    dataPS2 += dataPS1 - MAX_DATA_PHASE_SEGMENT_1;
-                    dataPS1 = MAX_DATA_PHASE_SEGMENT_1;
-                }
-                //---
-                int TDCO = (int)(bestBRP * dataPS1); // According to DS20005678D, ??3.4.8 Page 20
-                mTDCO = (sbyte)((TDCO > 63) ? 63 : (byte)TDCO);
-                mDataPhaseSegment1 = (byte)dataPS1;
-                mDataPhaseSegment2 = (byte)dataPS2;
-                mDataSJW = mDataPhaseSegment2;
-                uint arbitrationTQCount = bestDataTQCount * mDataBitRateFactor;
-                //--- Compute arbiration PS2 (1 <= PS2 <= 128)
-                uint arbitrationPS2 = arbitrationTQCount / 5; // For sampling point at 80%
-                if (arbitrationPS2 == 0)
-                {
-                    arbitrationPS2 = 1;
-                }
-                //--- Compute PS1 (1 <= PS1 <= 256)
-                uint arbitrationPS1 = arbitrationTQCount - arbitrationPS2 - 1 /* Sync Seg */ ;
-                if (arbitrationPS1 > MAX_ARBITRATION_PHASE_SEGMENT_1)
-                {
-                    arbitrationPS2 += arbitrationPS1 - MAX_ARBITRATION_PHASE_SEGMENT_1;
-                    arbitrationPS1 = MAX_ARBITRATION_PHASE_SEGMENT_1;
-                }
-                //---
-                mBitRatePrescaler = (ushort)bestBRP;
-                mArbitrationPhaseSegment1 = (ushort)arbitrationPS1;
-                mArbitrationPhaseSegment2 = (byte)arbitrationPS2;
-                mArbitrationSJW = mArbitrationPhaseSegment2; // Always 1 <= SJW <= 128, and SJW <= mArbitrationPhaseSegment2
-                                                             //--- Final check of the nominal configuration
-                uint W = arbitrationTQCount * inDesiredArbitrationBitRate * bestBRP;
-                ulong diff = (mSysClock > W) ? (mSysClock - W) : (W - mSysClock);
-                ulong ppm = (1000UL * 1000UL); // UL suffix is required for Arduino Uno
-                mArbitrationBitRateClosedToDesiredRate = (diff * ppm) <= (((ulong)W) * inTolerancePPM);
-            }
-
-            return mArbitrationBitRateClosedToDesiredRate;
-        }
-
-        int BitTimeConfigureNominal()
-        {
-            int spiTransferError = 0;
-            REG_CiNBTCFG ciNbtcfg = new REG_CiNBTCFG();
-
-            ciNbtcfg.word = MCP2518_Registers.canControlResetValues[MCP2518_Registers.cREGADDR_CiNBTCFG / 4];
-            ciNbtcfg.UpdateFromWord();
-
-            // Arbitration Bit rate
-            ciNbtcfg.bF.BRP = (uint)mBitRatePrescaler - 1;
-            ciNbtcfg.bF.TSEG1 = (uint)mArbitrationPhaseSegment1 - 1;
-            ciNbtcfg.bF.TSEG2 = (uint)mArbitrationPhaseSegment2 - 1;
-            ciNbtcfg.bF.SJW = (uint)mArbitrationSJW - 1;
-
-            ciNbtcfg.UpdateFromReg();
-
-            // Write Bit time registers
-            spiTransferError = WriteWord(MCP2518_Registers.cREGADDR_CiNBTCFG, ciNbtcfg.word);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-        int BitTimeConfigureData(CAN_SSP_MODE sspMode)
-        {
-            int spiTransferError = 0;
-            REG_CiDBTCFG ciDbtcfg = new REG_CiDBTCFG();
-            REG_CiTDC ciTdc = new REG_CiTDC();
-
-            // Write Bit time registers
-            ciDbtcfg.word = MCP2518_Registers.canControlResetValues[MCP2518_Registers.cREGADDR_CiDBTCFG / 4];
-            ciDbtcfg.UpdateFromWord();
-
-            ciDbtcfg.bF.BRP = (uint)mBitRatePrescaler - 1;
-            ciDbtcfg.bF.TSEG1 = (uint)mDataPhaseSegment1 - 1;
-            ciDbtcfg.bF.TSEG2 = (uint)mDataPhaseSegment2 - 1;
-            ciDbtcfg.bF.SJW = (uint)mDataSJW - 1;
-            ciDbtcfg.UpdateFromReg();
-
-            spiTransferError = WriteWord(MCP2518_Registers.cREGADDR_CiDBTCFG, ciDbtcfg.word);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            // Configure Bit time and sample point, SSP
-            ciTdc.word = MCP2518_Registers.canControlResetValues[MCP2518_Registers.cREGADDR_CiTDC / 4];
-            ciTdc.UpdateFromWord();
-
-            ciTdc.bF.TDCMode = (uint)sspMode;
-            ciTdc.bF.TDCOffset = (uint)mTDCO;
-            ciTdc.UpdateFromReg();
-            // ciTdc.bF.TDCValue = ?;
-
-            spiTransferError = WriteWord(MCP2518_Registers.cREGADDR_CiTDC, ciTdc.word);
-            if (spiTransferError != 0)
-            {
-                return -3;
-            }
-
-            return spiTransferError;
-        }
-
-        void BitTimeConfigure(uint speedset, CAN_SSP_MODE sspMode, CAN_SYSCLK_SPEED clk)
-        {
-
-            // Decode bitrate
-            mDesiredArbitrationBitRate = (uint)(speedset & 0xFFFFFUL);
-            mDataBitRateFactor = (byte)((speedset >> 24) & 0xFF);
-
-            // Decode clk
-            switch (clk)
-            {
-                case CAN_SYSCLK_SPEED.CAN_SYSCLK_10M:
-                    mSysClock = (uint)(10UL * 1000UL * 1000UL); break;
-                case CAN_SYSCLK_SPEED.CAN_SYSCLK_20M:
-                    mSysClock = (uint)(20UL * 1000UL * 1000UL); break;
-                case CAN_SYSCLK_SPEED.CAN_SYSCLK_40M:
-                default:
-                    mSysClock = (uint)(40UL * 1000UL * 1000UL); break;
-            }
-
-            calcBittime(mDesiredArbitrationBitRate);
-            BitTimeConfigureNominal();
-            BitTimeConfigureData(sspMode);
-        }
-
-        int GpioModeConfigure(GPIO_PIN_MODE gpio0, GPIO_PIN_MODE gpio1)
-        {
-            int spiTransferError = 0;
-            // Read
-            ushort a = (ushort)(MCP2518_Registers.cREGADDR_IOCON + 3);
-            REG_IOCON iocon = new REG_IOCON();
-            iocon.word = 0;
-            iocon.UpdateFromWord();
-
-
-            iocon.bytes[3] = ReadByte(a);
-
-            iocon.UpdateFromByte();
-
-            // Modify
-            iocon.bF.PinMode0 = (uint)gpio0;
-            iocon.bF.PinMode1 = (uint)gpio1;
-            iocon.UpdateFromReg();
-
-            // Write
-            spiTransferError = WriteByte(a, iocon.bytes[3]);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-        int TransmitChannelEventEnable(CAN_FIFO_CHANNEL channel, CAN_TX_FIFO_EVENT flags)
-        {
-            int spiTransferError = 0;
-            // Read Interrupt Enables
-            ushort a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518_Registers.CiFIFO_OFFSET));
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            ciFifoCon.word = 0;
-            ciFifoCon.UpdateFromWord();
-
-            ciFifoCon.bytes[0] = ReadByte(a);
-
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            ciFifoCon.UpdateFromBytes();
-
-            // Modify
-            ciFifoCon.bytes[0] |= (byte)(flags & CAN_TX_FIFO_EVENT.CAN_TX_FIFO_ALL_EVENTS);
-            ciFifoCon.UpdateFromBytes();
-
-            // Write
-            spiTransferError = WriteByte(a, ciFifoCon.bytes[0]);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-        int ReceiveChannelEventEnable(CAN_FIFO_CHANNEL channel, CAN_RX_FIFO_EVENT flags)
-        {
-            int spiTransferError = 0;
-            ushort a = 0;
-
-            if (channel == (CAN_FIFO_CHANNEL)MCP2518_Registers.CAN_TXQUEUE_CH0)
-                return -100;
-
-            // Read Interrupt Enables
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518_Registers.CiFIFO_OFFSET));
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            ciFifoCon.word = 0;
-            ciFifoCon.UpdateFromWord();
-
-            ciFifoCon.bytes[0] = ReadByte(a);
-
-            ciFifoCon.UpdateFromBytes();
-
-            // Modify
-            ciFifoCon.bytes[0] |= (byte)(flags & CAN_RX_FIFO_EVENT.CAN_RX_FIFO_ALL_EVENTS);
-            ciFifoCon.UpdateFromBytes();
-
-            // Write
-            spiTransferError = WriteByte(a, ciFifoCon.bytes[0]);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-        int ModuleEventEnable(CAN_MODULE_EVENT flags)
-        {
-            int spiTransferError = 0;
-            ushort a = 0;
-
-            // Read Interrupt Enables
-            a = MCP2518_Registers.cREGADDR_CiINTENABLE;
-            REG_CiINTENABLE intEnables = new REG_CiINTENABLE();
-            intEnables.word = 0;
-            intEnables.UpdateFromWord();
-
-            intEnables.word = ReadHalfWord(a);
-
-            intEnables.UpdateFromBytes();
-
-            // Modify
-            intEnables.word |= (ushort)(flags & CAN_MODULE_EVENT.CAN_ALL_EVENTS);
-            intEnables.UpdateFromWord();
-
-            // Write
-            spiTransferError = WriteHalfWord(a, intEnables.word);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-        int OperationModeSelect(CAN_OPERATION_MODE opMode)
-        {
-            int spiTransferError = 0;
-            byte d = 0;
-
-            // Read
-            d = ReadByte((ushort)(MCP2518_Registers.cREGADDR_CiCON + 3));
-
-            d &= 0xF8;
-            d |= (byte)opMode;
-
-            // Write
-            spiTransferError = WriteByte((ushort)(MCP2518_Registers.cREGADDR_CiCON + 3), d);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-        CAN_OPERATION_MODE OperationModeGet()
-        {
-            int spiTransferError = 0;
-            byte d = 0;
-            CAN_OPERATION_MODE mode = CAN_OPERATION_MODE.CAN_INVALID_MODE;
-
-            // Read Opmode
-            d = ReadByte((ushort)(MCP2518_Registers.cREGADDR_CiCON + 2));
-
-            // Get Opmode bits
-            d = (byte)((d >> 5) & 0x7);
-
-            // Decode Opmode
-            switch ((CAN_OPERATION_MODE)d)
-            {
-                case CAN_OPERATION_MODE.CAN_NORMAL_MODE:
-                    mode = CAN_OPERATION_MODE.CAN_NORMAL_MODE;
-                    break;
-                case CAN_OPERATION_MODE.CAN_SLEEP_MODE:
-                    mode = CAN_OPERATION_MODE.CAN_SLEEP_MODE;
-                    break;
-                case CAN_OPERATION_MODE.CAN_INTERNAL_LOOPBACK_MODE:
-                    mode = CAN_OPERATION_MODE.CAN_INTERNAL_LOOPBACK_MODE;
-                    break;
-                case CAN_OPERATION_MODE.CAN_EXTERNAL_LOOPBACK_MODE:
-                    mode = CAN_OPERATION_MODE.CAN_EXTERNAL_LOOPBACK_MODE;
-                    break;
-                case CAN_OPERATION_MODE.CAN_LISTEN_ONLY_MODE:
-                    mode = CAN_OPERATION_MODE.CAN_LISTEN_ONLY_MODE;
-                    break;
-                case CAN_OPERATION_MODE.CAN_CONFIGURATION_MODE:
-                    mode = CAN_OPERATION_MODE.CAN_CONFIGURATION_MODE;
-                    break;
-                case CAN_OPERATION_MODE.CAN_CLASSIC_MODE:
-                    mode = CAN_OPERATION_MODE.CAN_CLASSIC_MODE;
-                    break;
-                case CAN_OPERATION_MODE.CAN_RESTRICTED_MODE:
-                    mode = CAN_OPERATION_MODE.CAN_RESTRICTED_MODE;
-                    break;
-                default:
-                    mode = CAN_OPERATION_MODE.CAN_INVALID_MODE;
-                    break;
-            }
-
-            return mode;
-        }
-
-        CAN_TX_FIFO_EVENT TransmitChannelEventGet(CAN_FIFO_CHANNEL channel)
-        {
-            CAN_TX_FIFO_EVENT flags;
-            int spiTransferError = 0;
-            ushort a = 0;
-
-            // Read Interrupt flags
-            REG_CiFIFOSTA ciFifoSta = new REG_CiFIFOSTA();
-            ciFifoSta.word = 0;
-            ciFifoSta.UpdateFromWord();
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOSTA + ((ushort)channel * MCP2518_Registers.CiFIFO_OFFSET));
-
-            ciFifoSta.bytes[0] = ReadByte(a);
-            ciFifoSta.UpdateFromBytes();
-
-            // Update data
-            flags = (CAN_TX_FIFO_EVENT)(ciFifoSta.bytes[0] & (byte)CAN_TX_FIFO_EVENT.CAN_TX_FIFO_ALL_EVENTS);
-
-            return flags;
-        }
-
-        ErrorCountState ErrorCountStateGet()
-        {
-            int spiTransferError = 0;
-            // Read Error
-            ushort a = MCP2518_Registers.cREGADDR_CiTREC;
-            REG_CiTREC ciTrec = new REG_CiTREC();
-            ciTrec.word = 0;
-            ciTrec.UpdateFromWord();
-
-            ciTrec.word = ReadWord(a);
-
-            ciTrec.UpdateFromWord();
-
-            // Update data
-            ErrorCountState res = new ErrorCountState();
-            res.tec = ciTrec.bytes[1];
-            res.rec = ciTrec.bytes[0];
-            res.flags = (CAN_ERROR_STATE)(ciTrec.bytes[2] & (byte)CAN_ERROR_STATE.CAN_ERROR_ALL);
-
-            return res;
-        }
-
-        // *****************************************************************************
-        // *****************************************************************************
-        // Section: Miscellaneous
-        uint DlcToDataBytes(CAN_DLC dlc)
-        {
-            uint dataBytesInObject = 0;
-
-            if (dlc < CAN_DLC.CAN_DLC_12)
-            {
-                dataBytesInObject = (uint)dlc;
-            }
-            else
-            {
-                switch (dlc)
-                {
-                    case CAN_DLC.CAN_DLC_12:
-                        dataBytesInObject = 12;
-                        break;
-                    case CAN_DLC.CAN_DLC_16:
-                        dataBytesInObject = 16;
-                        break;
-                    case CAN_DLC.CAN_DLC_20:
-                        dataBytesInObject = 20;
-                        break;
-                    case CAN_DLC.CAN_DLC_24:
-                        dataBytesInObject = 24;
-                        break;
-                    case CAN_DLC.CAN_DLC_32:
-                        dataBytesInObject = 32;
-                        break;
-                    case CAN_DLC.CAN_DLC_48:
-                        dataBytesInObject = 48;
-                        break;
-                    case CAN_DLC.CAN_DLC_64:
-                        dataBytesInObject = 64;
-                        break;
-                    default:
-                        break;
-                }
-            }
-
-            return dataBytesInObject;
-        }
-
-        int TransmitChannelLoad(CAN_FIFO_CHANNEL channel, CAN_TX_MSGOBJ txObj, byte[] txd, uint txdNumBytes, bool flush)
-        {
-            int spiTransferError = 0;
-            ushort a;
-            uint[] fifoReg = new uint[3];
-            uint dataBytesInObject;
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            REG_CiFIFOUA ciFifoUa = new REG_CiFIFOUA();
-
-            // Get FIFO registers
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518_Registers.CiFIFO_OFFSET));
-
-            spiTransferError = ReadWordArray(a, fifoReg, 3);
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            // Check that it is a transmit buffer
-            ciFifoCon.word = fifoReg[0];
-            ciFifoCon.UpdateFromWord();
-
-            if (!(ciFifoCon.txBF.TxEnable > 0))
-            {
-                return -2;
-            }
-
-            // Check that DLC is big enough for data
-            dataBytesInObject = DlcToDataBytes((CAN_DLC)txObj.bF.ctrl.DLC);
-
-            if (dataBytesInObject < txdNumBytes)
-            {
-                return -3;
-            }
-
-            // Get address
-            ciFifoUa.word = fifoReg[2];
-            ciFifoUa.UpdateFromWord();
-            a = (ushort)ciFifoUa.bF.UserAddress;
-            a += MCP2518_Registers.cRAMADDR_START;
-            byte[] txBuffer = new byte[MCP2518_Registers.MAX_MSG_SIZE];
-
-            txBuffer[0] = txObj.bytes[0]; // not using 'for' to reduce no of instructions
-            txBuffer[1] = txObj.bytes[1];
-            txBuffer[2] = txObj.bytes[2];
-            txBuffer[3] = txObj.bytes[3];
-
-            txBuffer[4] = txObj.bytes[4];
-            txBuffer[5] = txObj.bytes[5];
-            txBuffer[6] = txObj.bytes[6];
-            txBuffer[7] = txObj.bytes[7];
-
-            byte i;
-            for (i = 0; i < txdNumBytes; i++)
-            {
-                txBuffer[i + 8] = txd[i];
-            }
-
-            // Make sure we write a multiple of 4 bytes to RAM
-            ushort n = 0;
-            byte j = 0;
-
-            if (txdNumBytes % 4 > 0)
-            {
-                // Need to add bytes
-                n = (ushort)(4 - (txdNumBytes % 4));
-                i = (byte)(txdNumBytes + 8);
-
-                for (j = 0; j < n; j++)
-                {
-                    txBuffer[i + 8 + j] = 0;
-                }
-            }
-            spiTransferError = WriteByteArray(a, txBuffer, (ushort)(txdNumBytes + 8 + n));
-            if (spiTransferError != 0)
-            {
-                return -4;
-            }
-
-            // Set UINC and TXREQ
-            spiTransferError = TransmitChannelUpdate(channel, flush);
-            if (spiTransferError != 0)
-            {
-                return -5;
-            }
-
-            return spiTransferError;
-        }
-
-        CAN_RX_FIFO_EVENT ReceiveChannelEventGet(CAN_FIFO_CHANNEL channel)
-        {
-            CAN_RX_FIFO_EVENT flags;
-            int spiTransferError = 0;
-            ushort a = 0;
-
-            if ((uint)channel == MCP2518_Registers.CAN_TXQUEUE_CH0)
-                return CAN_RX_FIFO_EVENT.CAN_RX_FIFO_NO_EVENT;
-
-            // Read Interrupt flags
-            REG_CiFIFOSTA ciFifoSta = new REG_CiFIFOSTA();
-            ciFifoSta.word = 0;
-            ciFifoSta.UpdateFromWord();
-
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOSTA + ((uint)channel * MCP2518_Registers.CiFIFO_OFFSET));
-
-            ciFifoSta.bytes[0] = ReadByte(a);
-            ciFifoSta.UpdateFromBytes();
-
-            // Update data
-            flags = (CAN_RX_FIFO_EVENT)(ciFifoSta.bytes[0] & (byte)CAN_RX_FIFO_EVENT.CAN_RX_FIFO_ALL_EVENTS);
-
-            return flags;
-        }
-
-        int ReceiveMessageGet(CAN_FIFO_CHANNEL channel, CAN_RX_MSGOBJ rxObj, byte[] rxd, byte nBytes)
-        {
-            int spiTransferError = 0;
-            byte n = 0;
-            byte i = 0;
-            ushort a;
-            uint[] fifoReg = new uint[3];
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            REG_CiFIFOUA ciFifoUa = new REG_CiFIFOUA();
-
-            // Get FIFO registers
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518_Registers.CiFIFO_OFFSET));
-
-            spiTransferError = ReadWordArray(a, fifoReg, 3);
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            // Check that it is a receive buffer
-            ciFifoCon.word = fifoReg[0];
-            ciFifoCon.UpdateFromWord();
-            ciFifoCon.txBF.TxEnable = 0;
-            ciFifoCon.UpdateFromTxReg();
-            if (ciFifoCon.txBF.TxEnable > 0)
-            {
-                return -2;
-            }
-
-            // Get address
-            ciFifoUa.word = fifoReg[2];
-            a = (ushort)ciFifoUa.bF.UserAddress;
-            a += MCP2518_Registers.cRAMADDR_START;
-
-            // Number of bytes to read
-            n = (byte)(nBytes + 8); // Add 8 header bytes
-
-            if (ciFifoCon.rxBF.RxTimeStampEnable > 0)
-            {
-                n += 4; // Add 4 time stamp bytes
-            }
-
-            // Make sure we read a multiple of 4 bytes from RAM
-            if (n % 4 > 0)
-            {
-                n = (byte)(n + 4 - (n % 4));
-            }
-
-            // Read rxObj using one access
-            byte[] ba = new byte[MCP2518_Registers.MAX_MSG_SIZE];
-
-            if (n > MCP2518_Registers.MAX_MSG_SIZE)
-            {
-                n = (byte)MCP2518_Registers.MAX_MSG_SIZE;
-            }
-
-            spiTransferError = ReadByteArray(a, ba, n);
-            if (spiTransferError != 0)
-            {
-                return -3;
-            }
-
-            // Assign message header
-            REG_t myReg = new REG_t();
-
-            myReg.bytes[0] = ba[0];
-            myReg.bytes[1] = ba[1];
-            myReg.bytes[2] = ba[2];
-            myReg.bytes[3] = ba[3];
-            myReg.UpdateFromBytes();
-            rxObj.word[0] = myReg.word;
-            rxObj.UpdateFromWord();
-
-            myReg.bytes[0] = ba[4];
-            myReg.bytes[1] = ba[5];
-            myReg.bytes[2] = ba[6];
-            myReg.bytes[3] = ba[7];
-            myReg.UpdateFromBytes();
-            rxObj.word[1] = myReg.word;
-            rxObj.UpdateFromWord();
-
-            if (ciFifoCon.rxBF.RxTimeStampEnable > 0)
-            {
-                myReg.bytes[0] = ba[8];
-                myReg.bytes[1] = ba[9];
-                myReg.bytes[2] = ba[10];
-                myReg.bytes[3] = ba[11];
-                rxObj.word[2] = myReg.word;
-                rxObj.UpdateFromWord();
-                // Assign message data
-                for (i = 0; i < nBytes; i++)
-                {
-                    rxd[i] = ba[i + 12];
-                }
-            }
-            else
-            {
-                rxObj.word[2] = 0;
-                rxObj.UpdateFromWord();
-                // Assign message data
-                for (i = 0; i < nBytes; i++)
-                {
-                    rxd[i] = ba[i + 8];
-                }
-            }
-
-            // UINC channel
-            spiTransferError = ReceiveChannelUpdate(channel);
-            if (spiTransferError != 0)
-            {
-                return -4;
-            }
-
-            return spiTransferError;
-        }
-
-        int ReceiveChannelUpdate(CAN_FIFO_CHANNEL channel)
-        {
-            int spiTransferError = 0;
-            ushort a = 0;
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-            ciFifoCon.word = 0;
-            ciFifoCon.UpdateFromWord();
-
-            // Set UINC
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOCON + ((uint)channel * MCP2518_Registers.CiFIFO_OFFSET) +
-            1); // Byte that contains FRESET
-            ciFifoCon.rxBF.UINC = 1;
-            ciFifoCon.UpdateFromRxReg();
-            // Write byte
-            spiTransferError = WriteByte(a, ciFifoCon.bytes[1]);
-
-            return spiTransferError;
-        }
-
-        int TransmitChannelUpdate(CAN_FIFO_CHANNEL channel, bool flush)
-        {
-            int spiTransferError = 0;
-            ushort a;
-            REG_CiFIFOCON ciFifoCon = new REG_CiFIFOCON();
-
-            // Set UINC
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOCON + ((uint)channel * MCP2518_Registers.CiFIFO_OFFSET) +
-            1); // Byte that contains FRESET
-            ciFifoCon.word = 0;
-            ciFifoCon.UpdateFromWord();
-            ciFifoCon.txBF.UINC = 1;
-
-            // Set TXREQ
-            if (flush)
-            {
-                ciFifoCon.txBF.TxRequest = 1;
-            }
-            ciFifoCon.UpdateFromTxReg();
-
-            spiTransferError = WriteByte(a, ciFifoCon.bytes[1]);
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            return spiTransferError;
-
-        }
-
-        CAN_RX_FIFO_STATUS ReceiveChannelStatusGet(CAN_FIFO_CHANNEL channel)
-        {
-            CAN_RX_FIFO_STATUS status;
-            int spiTransferError = 0;
-            ushort a;
-            REG_CiFIFOSTA ciFifoSta = new REG_CiFIFOSTA();
-
-            // Read
-            ciFifoSta.word = 0;
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOSTA + ((uint)channel * MCP2518_Registers.CiFIFO_OFFSET));
-
-
-            ciFifoSta.bytes[0] = ReadByte(a);
-            ciFifoSta.UpdateFromBytes();
-
-            // Update data
-            status = (CAN_RX_FIFO_STATUS)(ciFifoSta.bytes[0] & 0x0F);
-
-            return status;
-        }
-
-        CAN_ERROR_STATE ErrorStateGet()
-        {
-            CAN_ERROR_STATE flags;
-            int spiTransferError = 0;
-            // Read Error state
-            byte f = 0;
-
-            f = ReadByte((ushort)(MCP2518_Registers.cREGADDR_CiTREC + 2));
-
-            // Update data
-            flags = (CAN_ERROR_STATE)(f & (byte)CAN_ERROR_STATE.CAN_ERROR_ALL);
-
-            return flags;
-        }
-
-        CAN_RXCODE ModuleEventRxCodeGet()
-        {
-            CAN_RXCODE rxCode;
-            int spiTransferError = 0;
-            byte rxCodeByte = 0;
-
-            rxCodeByte = ReadByte((ushort)(MCP2518_Registers.cREGADDR_CiVEC + 3));
-
-            // Decode data
-            // 0x40 = "no interrupt" (CAN_FIFO_CIVEC_NOINTERRUPT)
-            if ((rxCodeByte < (byte)CAN_RXCODE.CAN_RXCODE_TOTAL_CHANNELS) ||
-            (rxCodeByte == (byte)CAN_RXCODE.CAN_RXCODE_NO_INT))
-            {
-                rxCode = (CAN_RXCODE)rxCodeByte;
-            }
-            else
-            {
-                rxCode = CAN_RXCODE.CAN_RXCODE_RESERVED; // shouldn't get here
-            }
-
-            return rxCode;
-        }
-
-        CAN_TXCODE ModuleEventTxCodeGet()
-        {
-            CAN_TXCODE txCode;
-            int spiTransferError = 0;
-            ushort a = 0;
-            byte txCodeByte;
-            // Read
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiVEC + 2);
-
-            txCodeByte = ReadByte(a);
-
-            // Decode data
-            // 0x40 = "no interrupt" (CAN_FIFO_CIVEC_NOINTERRUPT)
-            if ((txCodeByte < (byte)CAN_TXCODE.CAN_TXCODE_TOTAL_CHANNELS) ||
-            (txCodeByte == (byte)CAN_TXCODE.CAN_TXCODE_NO_INT))
-            {
-                txCode = (CAN_TXCODE)txCodeByte;
-            }
-            else
-            {
-                txCode = CAN_TXCODE.CAN_TXCODE_RESERVED; // shouldn't get here
-            }
-
-            return txCode;
-        }
-
-        int TransmitChannelEventAttemptClear(CAN_FIFO_CHANNEL channel)
-        {
-            int spiTransferError = 0;
-            ushort a = 0;
-
-            // Read Interrupt Enables
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFIFOSTA + ((uint)channel * MCP2518_Registers.CiFIFO_OFFSET));
-            REG_CiFIFOSTA ciFifoSta = new REG_CiFIFOSTA();
-            ciFifoSta.word = 0;
-            ciFifoSta.UpdateFromWord();
-
-            ciFifoSta.bytes[0] = ReadByte(a);
-            ciFifoSta.UpdateFromBytes();
-
-            // Modify
-            ciFifoSta.bytes[0] &= 0b11101111;
-            ciFifoSta.UpdateFromBytes();
-
-            // Write
-            spiTransferError = WriteByte(a, ciFifoSta.bytes[0]);
-
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-
-        int LowPowerModeEnable()
-        {
-            int spiTransferError = 0;
-            byte d = 0;
-
-            // Read
-            d = ReadByte((ushort)MCP2518_Registers.cREGADDR_OSC);
-
-            // Modify
-            d |= 0x08;
-
-            // Write
-            spiTransferError = WriteByte(MCP2518_Registers.cREGADDR_OSC, d);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-        int LowPowerModeDisable()
-        {
-            int spiTransferError = 0;
-            byte d = 0;
-            // Read
-            d = ReadByte(MCP2518_Registers.cREGADDR_OSC);
-
-            // Modify
-            d &= 0b0111;
-
-            // Write
-            spiTransferError = WriteByte(MCP2518_Registers.cREGADDR_OSC, d);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-        void TransmitMessageQueue()
-        {
-            byte attempts = (byte)MAX_TXQUEUE_ATTEMPTS;
-
-            // Check if FIFO is not full
-
-            do
-            {
-                txFlags = TransmitChannelEventGet(APP_TX_FIFO);
-                if (attempts == 0)
-                {
-                    var res = ErrorCountStateGet();
-                    return;
-                }
-                attempts--;
-            } while (!((txFlags & CAN_TX_FIFO_EVENT.CAN_TX_FIFO_NOT_FULL_EVENT) > 0));
-
-            // Load message and transmit
-            byte n = (byte)DlcToDataBytes((CAN_DLC)txObj.bF.ctrl.DLC);
-            TransmitChannelLoad(APP_TX_FIFO, txObj, txd, n, true);
-        }
-
-        /*********************************************************************************************************
-        ** Function name:           sendMsg
-        ** Descriptions:            send message
-        *********************************************************************************************************/
-        byte SendMsg(byte[] buf, byte len, ulong id, byte ext, byte rtr, bool wait_sent)
-        {
-            byte n;
-            int i;
-            byte spiTransferError = 0;
-            // Configure message data
-            txObj.word[0] = 0;
-            txObj.word[1] = 0;
-
-            txObj.bF.ctrl.RTR = (uint)(rtr > 0 ? 1 : 0);
-            if (rtr > 0 && len > (byte)CAN_DLC.CAN_DLC_8)
-            {
-                len = (byte)CAN_DLC.CAN_DLC_8;
-            }
-            txObj.bF.ctrl.DLC = len;
-
-            txObj.bF.ctrl.IDE = (uint)(ext > 0 ? 1 : 0);
-            if (ext > 0)
-            {
-                txObj.bF.id.SID = (uint)((id >> 18) & 0x7FF);
-                txObj.bF.id.EID = (uint)(id & 0x3FFFF);
-            }
-            else
-            {
-                txObj.bF.id.SID = (uint)id;
-            }
-
-            txObj.bF.ctrl.BRS = 1;
-
-            //txObj.bF.ctrl.FDF = (len > 8);
-            txObj.bF.ctrl.FDF = (uint)(__flgFDF ? 1 : 0);
-            //if(__flgFDF)
-
-            txObj.UpdateFromReg();
-
-            n = (byte)DlcToDataBytes((CAN_DLC)txObj.bF.ctrl.DLC);
-            // Prepare data
-            for (i = 0; i < n; i++)
-            {
-                txd[i] = buf[i];
-            }
-
-            TransmitMessageQueue();
-            return spiTransferError;
-        }
-
-        int ReceiveMsg()
-        {
-            rxFlags = ReceiveChannelEventGet(APP_RX_FIFO);
-
-
-            if ((rxFlags & CAN_RX_FIFO_EVENT.CAN_RX_FIFO_NOT_EMPTY_EVENT) > 0)
-            {
-                ReceiveMessageGet(APP_RX_FIFO, rxObj, rxd, 8);
-            }
-
-            return 0;
-        }
-
-        uint Bittime_compat_to_mcp2518fd(uint speedset)
-        {
-            uint r = 0;
-
-            if (speedset > 0x100)
-            {
-                return speedset;
-            }
-            switch ((MCP_BITTIME_SETUP)speedset)
-            {
-                case MCP_BITTIME_SETUP.CAN20_5KBPS: r = BITRATE((uint)5000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_10KBPS: r = BITRATE((uint)10000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_20KBPS: r = BITRATE((uint)20000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_25KBPS: r = BITRATE((uint)25000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_31K25BPS: r = BITRATE((uint)31250UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_33KBPS: r = BITRATE((uint)33000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_40KBPS: r = BITRATE((uint)40000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_50KBPS: r = BITRATE((uint)50000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_80KBPS: r = BITRATE((uint)80000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_83K3BPS: r = BITRATE((uint)83300UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_95KBPS: r = BITRATE((uint)95000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_100KBPS: r = BITRATE((uint)100000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_125KBPS: r = BITRATE((uint)125000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_200KBPS: r = BITRATE((uint)200000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_250KBPS: r = BITRATE((uint)250000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_500KBPS: r = BITRATE((uint)500000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_666KBPS: r = BITRATE((uint)666000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_800KBPS: r = BITRATE((uint)800000UL, 0); break;
-                case MCP_BITTIME_SETUP.CAN20_1000KBPS: r = BITRATE((uint)1000000UL, 0); break;
-            }
-            return r;
-        }
-
-        uint BITRATE(uint arbitration, byte factor)
-        {
-            return ((uint)factor << 24) | (uint)(arbitration & 0xFFFFFUL);
-        }
-
-        /*********************************************************************************************************
-        ** Function name:           mcp2515_init
-        ** Descriptions:            init the device
-        **                          speedset msb  8 bits = factor (0 or 1 is no bit rate switch)
-        **                                   lsb 24 bits = arbitration bitrate
-        *********************************************************************************************************/
-        byte Init(uint speedset, CAN_SYSCLK_SPEED clock)
-        {
-            // Reset device
-            Reset();
-
-            // Enable ECC and initialize RAM
-            EccEnable();
-
-            RamInit(0xff);
-
-            // Configure device
-            ConfigureObjectReset(config);
-            config.IsoCrcEnable = 1;
-            config.StoreInTEF = 0;
-            Configure(config);
-
-            // Setup TX FIFO
-            TransmitChannelConfigureObjectReset(txConfig);
-            txConfig.FifoSize = 7;
-            txConfig.PayLoadSize = (uint)CAN_FIFO_PLSIZE.CAN_PLSIZE_64;
-            txConfig.TxPriority = 1;
-
-            TransmitChannelConfigure(APP_TX_FIFO, txConfig);
-
-            // Setup RX FIFO
-            ReceiveChannelConfigureObjectReset(rxConfig);
-            rxConfig.FifoSize = 15;
-            rxConfig.PayLoadSize = (uint)CAN_FIFO_PLSIZE.CAN_PLSIZE_64;
-            ReceiveChannelConfigure(APP_RX_FIFO, rxConfig);
-
-            // Setup RX Filter
-            //fObj.word = 0;
-            //mcp2518fd_FilterObjectConfigure(CAN_FILTER0, &fObj.bF);
-
-            // Setup RX Mask
-            //mObj.word = 0; // Only allow standard IDs
-            //mcp2518fd_FilterMaskConfigure(CAN_FILTER0, &mObj.bF);
-
-            for (int i = 0; i < 32; i++)
-                FilterDisable((CAN_FILTER)i);          // disable all filter
-
-
-            // Link FIFO and Filter
-            FilterToFifoLink(CAN_FILTER.CAN_FILTER0, APP_RX_FIFO, true);
-
-            // Setup Bit Time
-            BitTimeConfigure(speedset, CAN_SSP_MODE.CAN_SSP_MODE_AUTO, clock);
-
-            // Setup Transmit and Receive Interrupts
-            GpioModeConfigure(GPIO_PIN_MODE.GPIO_MODE_INT, GPIO_PIN_MODE.GPIO_MODE_INT);
-
-            TransmitChannelEventEnable(APP_TX_FIFO, CAN_TX_FIFO_EVENT.CAN_TX_FIFO_NOT_FULL_EVENT);
-
-            ReceiveChannelEventEnable(APP_RX_FIFO, CAN_RX_FIFO_EVENT.CAN_RX_FIFO_NOT_EMPTY_EVENT);
-            ModuleEventEnable(CAN_MODULE_EVENT.CAN_TX_EVENT | CAN_MODULE_EVENT.CAN_RX_EVENT);
-            SetMode((byte)mcpMode);
-
-            return 0;
-        }
-
-        /*********************************************************************************************************
-        ** Function name:           enableTxInterrupt
-        ** Descriptions:            enable interrupt for all tx buffers
-        *********************************************************************************************************/
-        public void EnableTxInterrupt(bool enable)
-        {
-            if (enable == true)
-            {
-                ModuleEventEnable(CAN_MODULE_EVENT.CAN_TX_EVENT);
-            }
-            return;
-        }
-
-        public void ReserveTxBuffers(byte nTxBuf = 0)
-        {
-            nReservedTx = (byte)(nTxBuf < 3 ? nTxBuf : 3 - 1);
-        }
-
-        public byte GetLastTxBuffer()
-        {
-            return 3 - 1; // read index of last tx buffer
-        }
-
-        //
-        public int FilterDisable(CAN_FILTER filter)
-        {
-            int spiTransferError = 0;
-            ushort a;
-            REG_CiFLTCON_BYTE fCtrl = new REG_CiFLTCON_BYTE();
-
-            // Read
-            a = (ushort)(MCP2518_Registers.cREGADDR_CiFLTCON + filter);
-
-            fCtrl.single_byte = ReadByte(a);
-            fCtrl.UpdateFromByte();
-
-            // Modify
-            fCtrl.bF.Enable = 0;
-            fCtrl.UpdateFromReg();
-
-            // mcp2518fd_WriteByte(ushort address, byte txd)
-            spiTransferError = WriteByte(a, fCtrl.single_byte);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
-        }
-
-
-        /*
-        typedef struct _CAN_FILTEROBJ_ID {
-          uint SID : 11;
-          uint EID : 18;
-          uint SID11 : 1;
-          uint EXIDE : 1;
-          uint unimplemented1 : 1;
-        } CAN_FILTEROBJ_ID;
-        */
-        public void Init_Filt_Mask(byte num, byte ext, ulong f, ulong m)
-        {
-
-            OperationModeSelect(CAN_OPERATION_MODE.CAN_CONFIGURATION_MODE);        // enter into setting mode
-
-
-            FilterDisable((CAN_FILTER)num);
-
-            CAN_FILTEROBJ_ID fObj = new CAN_FILTEROBJ_ID();
-            if (ext > 0)
-            {
-                fObj.SID = 0;
-                fObj.SID11 = (uint)f >> 18;
-                fObj.EID = (uint)f & 0x3ffff;
-                fObj.EXIDE = 1;
-            }
-            else
-            {
-                fObj.SID = (uint)f;
-                fObj.SID11 = 0;
-                fObj.EID = 0;
-                fObj.EXIDE = 0;
-            }
-
-            FilterObjectConfigure((CAN_FILTER)num, fObj);
-
-            CAN_MASKOBJ_ID mObj = new CAN_MASKOBJ_ID();
-            if (ext > 0)
-            {
-                mObj.MSID = 0;
-                mObj.MSID11 = (uint)m >> 18;
-                mObj.MEID = (uint)m & 0x3ffff;
-                mObj.MIDE = 1;
-            }
-            else
-            {
-                mObj.MSID = (uint)m;
-                mObj.MSID11 = 0;
-                mObj.MEID = 0;
-                mObj.MIDE = 1;
-            }
-
-            FilterMaskConfigure((CAN_FILTER)num, mObj);
-            bool filterEnable = true;
-
-            FilterToFifoLink((CAN_FILTER)num, APP_RX_FIFO, filterEnable);
-
-            OperationModeSelect(mcpMode);
         }
 
-        /*********************************************************************************************************
-        ** Function name:           setSleepWakeup
-        ** Descriptions:            Enable or disable the wake up interrupt (If disabled
-        *the MCP2515 will not be woken up by CAN bus activity)
-        *********************************************************************************************************/
-        public void SetSleepWakeup(bool enable)
+        public override byte CheckClearRxStatus(out byte status)
         {
-            if (enable)
-            {
-                LowPowerModeEnable();
-            }
-            else
-            {
-                LowPowerModeDisable();
-            }
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           sleep
-        ** Descriptions:            Put mcp2515 in sleep mode to save power
-        *********************************************************************************************************/
-        public int Sleep()
+        public override byte CheckClearTxStatus(out byte status)
         {
-            if (GetMode() != 0x01)
-            {
-                return OperationModeSelect(CAN_OPERATION_MODE.CAN_SLEEP_MODE);
-            }
-            else
-            {
-                return CAN_OK;
-            }
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           wake
-        ** Descriptions:            wake MCP2515 manually from sleep. It will come back
-        *in the mode it was before sleeping.
-        *********************************************************************************************************/
-        public int Wake()
+        public override byte CheckError(out byte err)
         {
-            byte currMode = GetMode();
-            if (currMode != (byte)mcpMode)
-            {
-                return OperationModeSelect(mcpMode);
-            }
-            else
-            {
-                return CAN_OK;
-            }
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           getMode
-        ** Descriptions:            Returns current control mode
-        *********************************************************************************************************/
-        public byte GetMode()
+        public override byte CheckReceive()
         {
-            CAN_OPERATION_MODE mode;
-            mode = OperationModeGet();
-            return (byte)mode;
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           __setMode
-        ** Descriptions:            Sets control mode
-        *********************************************************************************************************/
-        public int SetMode(byte opMode)
+        public override void ClearBufferTransmitIfFlags(byte flags = 0)
         {
-            if ((CAN_OPERATION_MODE)opMode != CAN_OPERATION_MODE.CAN_SLEEP_MODE)
-            { // if going to sleep, the value stored in opMode is not
-              // changed so that we can return to it later
-                mcpMode = (CAN_OPERATION_MODE)opMode;
-            }
-            return OperationModeSelect(mcpMode);
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           readMsgBufID
-        ** Descriptions:            Read message buf and can bus source ID according to
-        *status.
-        **                          Status has to be read with readRxTxStatus.
-        *********************************************************************************************************/
-        public CANMSG ReadMsgBufID(byte status, CANMSG rxMSG)
+        public override void EnableTxInterrupt(bool enable = true)
         {
-
-            int r = ReadMsgBufID(rxMSG.len, rxMSG.buf);
-            rxMSG.CANID = can_id;
-
-            rxMSG.IsExtended = ext_flg > 0;
-            
-            rxMSG.IsExtended = this.rtr > 0;
-
-            return rxMSG;
-        }
-
-        public CANMSG ReadMsgBufID(ulong ID, byte len, byte[] buf)
-        {
-            CANMSG rxMSG = new CANMSG();
-            rxMSG.CANID = ID;
-            rxMSG.len = len;
-            rxMSG.buf = buf;
-            rxMSG.IsRemote = rtr > 0;
-            rxMSG.IsExtended = ext_flg > 0;
-            return ReadMsgBufID(ReadRxTxStatus(), rxMSG);
-
-        }
-
-        public CANMSG ReadMsgBuf(byte len, byte[] buf)
-        {
-            CANMSG rxMSG = new CANMSG();
-            rxMSG.CANID = can_id;
-            rxMSG.len = len;
-            rxMSG.buf = buf;
-            rxMSG.IsRemote = rtr > 0;
-            rxMSG.IsExtended = ext_flg > 0;
-            return ReadMsgBufID(ReadRxTxStatus(), rxMSG);
-
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           checkReceive
-        ** Descriptions:            check if got something
-        *********************************************************************************************************/
-        unsafe public byte CheckReceive()
+        public override byte GetLastTxBuffer()
         {
-            CAN_RX_FIFO_STATUS status;
-            // RXnIF in Bit 1 and 0 return ((res & MCP_STAT_RXIF_MASK)? CAN_MSGAVAIL: CAN_NOMSG);
-            ReceiveChannelStatusGet(APP_RX_FIFO, &status);
-
-            byte res = (byte)(((byte)status & (byte)CAN_RX_FIFO_EVENT.CAN_RX_FIFO_NOT_EMPTY_EVENT) + 2);
-            return res;
+            throw new NotImplementedException();
         }
-
-        /*********************************************************************************************************
-        ** Function name:           checkError
-        ** Descriptions:            if something error
-        *********************************************************************************************************/
 
-        unsafe public byte CheckError(CAN_ERROR_STATE* err_ptr)
+        public override byte McpDigitalRead(byte pin)
         {
-            CAN_ERROR_STATE flags;
-            ErrorStateGet(&flags);
-            *err_ptr = flags;
-
-            return (byte)flags;
-
+            throw new NotImplementedException();
         }
-
 
-        // /*********************************************************************************************************
-        // ** Function name:           readMsgBufID
-        // ** Descriptions:            Read message buf and can bus source ID according
-        // to status.
-        // **                          Status has to be read with readRxTxStatus.
-        // *********************************************************************************************************/
-        public CANMSG ReadMsgBufID(CANMSG rxMSG)
+        public override bool McpDigitalWrite(byte pin, byte mode)
         {
-            var r = ReceiveMessageGet(APP_RX_FIFO, rxObj, rxMSG.rxd, (byte)MCP2518_Registers.MAX_DATA_BYTES);
-            ext_flg = (byte)rxObj.bF.ctrl.IDE;
-            //can_id = ext_flg? (rxObj.bF.id.EID | (rxObj.bF.id.SID << 18))
-            can_id = ext_flg > 0 ? (rxObj.bF.id.EID | ((uint)rxObj.bF.id.SID << 18)) : rxObj.bF.id.SID;
-            //:  rxObj.bF.id.SID;
-            rtr = (byte)rxObj.bF.ctrl.RTR;
-            byte n = (byte)DlcToDataBytes((CAN_DLC)rxObj.bF.ctrl.DLC);
-            if (len > 0)
-            {
-                len = n;
-            }
-
-            for (int i = 0; i < n; i++)
-            {
-                buf[i] = rxd[i];
-            }
-
-            CANMSG rxMSG = new CANMSG();
-
-            return 0;
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           trySendMsgBuf
-        ** Descriptions:            Try to send message. There is no delays for waiting
-        *free buffer.
-        *********************************************************************************************************/
-        public byte TrySendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, byte iTxBuf)
+        public override bool McpPinMode(byte pin, byte mode)
         {
-            return SendMsg(buf, len, id, ext, rtr, false);
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           clearBufferTransmitIfFlags
-        ** Descriptions:            Clear transmit interrupt flags for specific buffer
-        *or for all unreserved buffers.
-        **                          If interrupt will be used, it is important to clear
-        *all flags, when there is no
-        **                          more data to be sent. Otherwise IRQ will newer
-        *change state.
-        *********************************************************************************************************/
-        public void ClearBufferTransmitIfFlags(byte flags = 0)
+        public override byte ReadMessageBuf(out byte len, byte[] buf)
         {
-            TransmitChannelEventAttemptClear(APP_TX_FIFO);
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           sendMsgBuf
-        ** Descriptions:            Send message by using buffer read as free from
-        *CANINTF status
-        **                          Status has to be read with readRxTxStatus and
-        *filtered with checkClearTxStatus
-        *********************************************************************************************************/
-        public byte SendMsgBuf(byte status, ulong id, byte ext, byte rtr,
-        byte len, byte[] buf)
+        public override byte ReadMessageBufID(out ulong id, out byte ext, out byte trt, out byte len, out byte[] buf)
         {
-            return SendMsg(buf, len, id, ext, rtr, true);
+            throw new NotImplementedException();
         }
 
-        public byte SendMsgBuf(ulong id, byte ext, byte len, byte[] buf)
+        public override byte ReadMessageBufID(out ulong ID, out byte len, byte[] buf)
         {
-            return SendMsgBuf(id, ext, 0, len, buf, true);
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           sendMsgBuf
-        ** Descriptions:            send buf
-        *********************************************************************************************************/
-        byte SendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, bool wait_sent)
+        public override byte ReadRxTxStatus()
         {
-            return SendMsg(buf, len, id, ext, rtr, wait_sent);
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           readRxTxStatus
-        ** Descriptions:            Read RX and TX interrupt bits. Function uses status
-        *reading, but translates.
-        **                          result to MCP_CANINTF. With this you can check
-        *status e.g. on interrupt sr
-        **                          with one single call to save SPI calls. Then use
-        *checkClearRxStatus and
-        **                          checkClearTxStatus for testing.
-        *********************************************************************************************************/
-        unsafe public byte ReadRxTxStatus()
+        public override void ReserveTxBuffers(byte nTxBuf = 0)
         {
-            byte ret;
-            fixed (CAN_RX_FIFO_EVENT* ptr = &rxFlags)
-            {
-                ReceiveChannelEventGet(APP_RX_FIFO, ptr);
-            }
-
-            ret = (byte)rxFlags;
-            return ret;
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           checkClearRxStatus
-        ** Descriptions:            Return first found rx CANINTF status and clears it
-        *from parameter.
-        **                          Note that this does not affect to chip CANINTF at
-        *all. You can use this
-        **                          with one single readRxTxStatus call.
-        *********************************************************************************************************/
-        public byte CheckClearRxStatus(byte status)
+        public override byte SendMsgBuf(byte status, ulong id, byte ext, byte rtr, byte len, byte[] buf)
         {
-            return 1;
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           checkClearTxStatus
-        ** Descriptions:            Return specified buffer of first found tx CANINTF
-        *status and clears it from parameter.
-        **                          Note that this does not affect to chip CANINTF at
-        *all. You can use this
-        **                          with one single readRxTxStatus call.
-        *********************************************************************************************************/
-        public byte CheckClearTxStatus(byte status, byte iTxBuf)
+        public override byte SendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, bool waitSent = true)
         {
-            return 1;
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           mcpPinMode
-        ** Descriptions:            switch supported pins between HiZ, interrupt, output
-        *or input
-        *********************************************************************************************************/
-        unsafe public int McpPinMode(byte pin, GPIO_PIN_MODE mode)
+        public override byte SetMode(CAN_OPERATION_MODE opMode)
         {
-            int spiTransferError = 0;
-            // Read
-            ushort a = (ushort)(MCP2518_Registers.cREGADDR_IOCON + 3);
-            REG_IOCON iocon = new REG_IOCON();
-            iocon.word = 0;
-            iocon.UpdateFromWord();
-
-            fixed (byte* ptr = &iocon.bytes[3])
-            {
-                spiTransferError = ReadByte(a, ptr);
-            }
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            if (pin == (byte)GPIO_PIN_POS.GPIO_PIN_0)
-            {
-                // Modify
-                iocon.bF.PinMode0 = (uint)mode;
-            }
-            if (pin == (byte)GPIO_PIN_POS.GPIO_PIN_1)
-            {
-                // Modify
-                iocon.bF.PinMode1 = (byte)mode;
-            }
-            iocon.UpdateFromReg();
-            // Write
-            spiTransferError = WriteByte(a, iocon.bytes[3]);
-            if (spiTransferError != 0)
-            {
-                return -2;
-            }
-
-            return spiTransferError;
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           mcpDigitalWrite
-        ** Descriptions:            write HIGH or LOW to RX0BF/RX1BF
-        *********************************************************************************************************/
-        unsafe public int McpDigitalWrite(GPIO_PIN_POS pin, GPIO_PIN_STATE mode)
+        public override void SetSleepWakeup(bool enable)
         {
-            int spiTransferError = 0;
-            // Read
-            ushort a = (ushort)(MCP2518_Registers.cREGADDR_IOCON + 1);
-            REG_IOCON iocon = new REG_IOCON();
-            iocon.word = 0;
-            iocon.UpdateFromWord();
-
-            fixed (byte* ptr = &iocon.bytes[1])
-            {
-                spiTransferError = ReadByte(a, ptr);
-            }
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-
-            // Modify
-            switch (pin)
-            {
-                case GPIO_PIN_POS.GPIO_PIN_0:
-                    iocon.bF.LAT0 = (byte)mode;
-                    break;
-                case GPIO_PIN_POS.GPIO_PIN_1:
-                    iocon.bF.LAT1 = (byte)mode;
-                    break;
-                default:
-                    return -2;
-            }
-            iocon.UpdateFromReg();
-
-            // Write
-            spiTransferError = WriteByte(a, iocon.bytes[1]);
-            if (spiTransferError != 0)
-            {
-                return -3;
-            }
-
-            return spiTransferError;
+            throw new NotImplementedException();
         }
 
-        /*********************************************************************************************************
-        ** Function name:           mcpDigitalRead
-        ** Descriptions:            read HIGH or LOW from supported pins
-        *********************************************************************************************************/
-        unsafe public sbyte McpDigitalRead(GPIO_PIN_POS pin)
+        public override byte Sleep()
         {
-            int spiTransferError = 0;
-            GPIO_PIN_STATE state;
-
-            // Read
-            REG_IOCON iocon = new REG_IOCON();
-            iocon.word = 0;
-            iocon.UpdateFromWord();
-
-            fixed (byte* ptr = &iocon.bytes[2])
-            {
-                spiTransferError = ReadByte((ushort)(MCP2518_Registers.cREGADDR_IOCON + 2), ptr);
-            }
-
-            if (spiTransferError != 0)
-            {
-                return -1;
-            }
-
-            iocon.UpdateFromByte();
-
-            // Update data
-            switch (pin)
-            {
-                case GPIO_PIN_POS.GPIO_PIN_0:
-                    state = (GPIO_PIN_STATE)iocon.bF.GPIO0;
-                    break;
-                case GPIO_PIN_POS.GPIO_PIN_1:
-                    state = (GPIO_PIN_STATE)iocon.bF.GPIO1;
-                    break;
-                default:
-                    return -2;
-            }
-
-            return (sbyte)state; ;
+            throw new NotImplementedException();
         }
 
-        /* CANFD Auxiliary helper */
-        public byte dlc2len(CAN_DLC dlc)
+        public override byte TrySendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, byte iTxBuf = 255)
         {
-            if (dlc <= CAN_DLC.CAN_DLC_8)
-                return (byte)dlc;
-            switch (dlc)
-            {
-                case CAN_DLC.CAN_DLC_12: return 12;
-                case CAN_DLC.CAN_DLC_16: return 16;
-                case CAN_DLC.CAN_DLC_20: return 20;
-                case CAN_DLC.CAN_DLC_24: return 24;
-                case CAN_DLC.CAN_DLC_32: return 32;
-                case CAN_DLC.CAN_DLC_48: return 48;
-                default:
-                case CAN_DLC.CAN_DLC_64: return 64;
-            }
+            throw new NotImplementedException();
         }
 
-        public byte len2dlc(byte len)
+        public override byte Wake()
         {
-            if (len <= (byte)CAN_DLC.CAN_DLC_8)
-                return len;
-            else if (len <= 12) return (byte)CAN_DLC.CAN_DLC_12;
-            else if (len <= 16) return (byte)CAN_DLC.CAN_DLC_16;
-            else if (len <= 20) return (byte)CAN_DLC.CAN_DLC_20;
-            else if (len <= 24) return (byte)CAN_DLC.CAN_DLC_24;
-            else if (len <= 32) return (byte)CAN_DLC.CAN_DLC_32;
-            else if (len <= 48) return (byte)CAN_DLC.CAN_DLC_48;
-            return (byte)CAN_DLC.CAN_DLC_64;
+            throw new NotImplementedException();
         }
     }
 
@@ -2641,7 +735,10 @@ namespace MCP2518
         public bool IsExtended { get; set; }
         public bool IsRemote { get; set; }
         public byte len { get; set; }
-        public byte[] buf = new byte[MCP2518_Registers.MAX_DATA_BYTES];
+
+        public byte rtr { get; set; }
+
+        public byte[] buf = new byte[MCP2518Dfs.MAX_DATA_BYTES];
     }
 
     public class ByteArrayCRC
@@ -2656,41 +753,6 @@ namespace MCP2518
         public byte rec;
         public CAN_ERROR_STATE flags;
     }
-
-
-    public enum MCP_CLOCK_T
-    {
-        MCP_NO_MHz,
-        /* apply to MCP2515 */
-        MCP_16MHz,
-        MCP_8MHz,
-        /* apply to MCP2518FD */
-        MCP2518FD_40MHz = MCP_16MHz /* To compatible MCP2515 shield */,
-        MCP2518FD_20MHz,
-        MCP2518FD_10MHz,
-    };
-
-    public enum MCP_BITTIME_SETUP
-    {
-        CAN_NOBPS,
-        CAN20_5KBPS,
-        CAN20_10KBPS,
-        CAN20_20KBPS,
-        CAN20_25KBPS,
-        CAN20_31K25BPS,
-        CAN20_33KBPS,
-        CAN20_40KBPS,
-        CAN20_50KBPS,
-        CAN20_80KBPS,
-        CAN20_83K3BPS,
-        CAN20_95KBPS,
-        CAN20_100KBPS,
-        CAN20_125KBPS,
-        CAN20_200KBPS,
-        CAN20_250KBPS,
-        CAN20_500KBPS,
-        CAN20_666KBPS,
-        CAN20_800KBPS,
-        CAN20_1000KBPS
-    }
 }
+
+

@@ -38,7 +38,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="MCP2518.cs" />
-    <Compile Include="MCP2518_Registers.cs" />
+    <Compile Include="MCP2518Dfs.cs" />
+    <Compile Include="MCPCanInterface.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
