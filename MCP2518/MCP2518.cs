@@ -109,29 +109,30 @@ namespace MCP2518
 
         #region Tx/Rx objects
 
-        static CAN_CONFIG config = new();
+        static MCP2518Dfs.CAN_CONFIG config = new();
+        private bool _flgFDF = false; // true: FD, false: 2.0
 
         // Receive objects
-        private static CAN_RX_FIFO_CONFIG rxConfig = new();
-        private static REG_CiFLTOBJ fObj = new();
-        private static REG_CiMASK mObj = new();
-        private static CAN_RX_FIFO_EVENT rxFlags;
-        private static CAN_RX_MSGOBJ rxObj = new();
+        private static MCP2518Dfs.CAN_RX_FIFO_CONFIG rxConfig = new();
+        private static MCP2518Dfs.REG_CiFLTOBJ fObj = new();
+        private static MCP2518Dfs.REG_CiMASK mObj = new();
+        private static MCP2518Dfs.CAN_RX_FIFO_EVENT rxFlags;
+        private static MCP2518Dfs.CAN_RX_MSGOBJ rxObj = new();
         private static byte[] rxd = new byte[MCP2518Dfs.MAX_DATA_BYTES];
 
         // Transmit objects
-        private static CAN_TX_FIFO_CONFIG txConfig = new();
-        private static CAN_TX_FIFO_EVENT txFlags = new();
-        private static CAN_TX_MSGOBJ txObj = new();
+        private static MCP2518Dfs.CAN_TX_FIFO_CONFIG txConfig = new();
+        private static MCP2518Dfs.CAN_TX_FIFO_EVENT txFlags = new();
+        private static MCP2518Dfs.CAN_TX_MSGOBJ txObj = new();
         private static byte[] txd = new byte[MCP2518Dfs.MAX_DATA_BYTES];
 
         private static int MAX_TXQUEUE_ATTEMPTS = 50;
 
         // Transmit Channels
-        private CAN_FIFO_CHANNEL APP_TX_FIFO = CAN_FIFO_CHANNEL.CAN_FIFO_CH2;
+        private MCP2518Dfs.CAN_FIFO_CHANNEL APP_TX_FIFO = MCP2518Dfs.CAN_FIFO_CHANNEL.CAN_FIFO_CH2;
 
         // Receive Channels
-        private CAN_FIFO_CHANNEL APP_RX_FIFO = CAN_FIFO_CHANNEL.CAN_FIFO_CH1;
+        private MCP2518Dfs.CAN_FIFO_CHANNEL APP_RX_FIFO = MCP2518Dfs.CAN_FIFO_CHANNEL.CAN_FIFO_CH1;
 
         #endregion
 
@@ -153,9 +154,17 @@ namespace MCP2518
         {
             this.spi = spi;
         }
-        public override byte Begin(MCP_BITTIME_SETUP speedSet, MCP_CLOCK clockSet)
+        public override byte Begin(MCP_BITTIME_SETUP speedSet, MCP_CLOCK clockSet = MCP_CLOCK.MCP2518FD_20MHz)
         {
-            throw new NotImplementedException();
+            var speed = BittimeCompatToMcp2518fd(speedSet);
+            if(speedSet > MCP_BITTIME_SETUP.CAN20_1000KBPS)
+            {
+                _flgFDF = true;
+            }
+
+            Init((MCP_BITTIME_SETUP)speed, (MCP2518Dfs.CAN_SYSCLK_SPEED)clockSet);
+
+            return 0;
         }
 
         private byte Reset()
@@ -202,9 +211,9 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        private byte ReadWord(ushort address, out uint rxd)
+        private byte ReadWord(ushort address, out int rxd)
         {
-            uint x;
+            int x;
             byte spiTransferError = 0;
 
             // Compose command
@@ -224,7 +233,7 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        private byte WriteWord(ushort address, uint txd)
+        private byte WriteWord(ushort address, int txd)
         {
             byte spiTransferError = 0;
 
@@ -235,7 +244,7 @@ namespace MCP2518
 
             for (int i = 0; i < 4; i++)
             {
-                spiTransmitBuffer[i+2] = (byte)((txd >> (i * 8)) & 0xFF);
+                spiTransmitBuffer[i + 2] = (byte)((txd >> (i * 8)) & 0xFF);
             }
 
             spi.Write(spiTransmitBuffer, 0, 6);
@@ -243,11 +252,11 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        private byte ReadHalfWord(ushort address, out ushort rxd)
+        private byte ReadHalfWord(ushort address, out short rxd)
         {
             byte spiTransferError = 0;
 
-            uint x;
+            int x;
 
             // Compose command
             spiTransmitBuffer[0] =
@@ -261,8 +270,28 @@ namespace MCP2518
             for (int i = 0; i < 2; i++)
             {
                 x = spiReceiveBuffer[i];
-                rxd += (ushort)(x << (i * 8));
+                rxd += (short)(x << (i * 8));
             }
+
+            return spiTransferError;
+        }
+
+        private byte WriteHalfWord(ushort address, short txd)
+        {
+            byte spiTransferError = 0;
+
+            // Compose command
+            spiTransmitBuffer[0] =
+            (byte)((cINSTRUCTION_WRITE << 4) + ((address >> 8) & 0xF));
+            spiTransmitBuffer[1] = (byte)(address & 0xFF);
+
+            // Split word into 2 bytes and add them to buffer
+            for (int i = 0; i < 2; i++)
+            {
+                spiTransmitBuffer[i + 2] = (byte)((txd >> (i * 8)) & 0xFF);
+            }
+
+            spi.Write(spiTransmitBuffer, 0, 4);
 
             return spiTransferError;
         }
@@ -333,7 +362,7 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        private byte WriteWordSafe(ushort address, uint txd)
+        private byte WriteWordSafe(ushort address, int txd)
         {
             ushort crcResult = 0;
             byte spiTransferError = 0;
@@ -383,7 +412,7 @@ namespace MCP2518
             spi.TransferSequential(spiTransmitBuffer, 0, 3, spiReceiveBuffer, 0, spiTransferSize - 3);
 
             // Get CRC from controller
-            crcFromSpiSalve = (ushort)((spiReceiveBuffer[nBytes + 2 ] << 8) + (spiReceiveBuffer[nBytes + 1]));
+            crcFromSpiSalve = (ushort)((spiReceiveBuffer[nBytes + 2] << 8) + (spiReceiveBuffer[nBytes + 1]));
 
             // Use the receive buffer to calculate CRC
             // First three bytes need to be command
@@ -438,9 +467,9 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        private byte ReadWordArray(ushort address, uint[] rxd, ushort nWords)
+        private byte ReadWordArray(ushort address, int[] rxd, ushort nWords)
         {
-            REG_t w = new();
+            MCP2518Dfs.REG_t w = new();
             ushort spiTransferSize = (ushort)(nWords * 4 + 2);
             byte spiTransferError = 0;
 
@@ -456,7 +485,7 @@ namespace MCP2518
 
             spi.TransferSequential(spiTransmitBuffer, 0, 2, spiReceiveBuffer, 0, spiTransferSize - 2);
 
-            int n = 2;
+            int n = 0;
             for (int i = 0; i < nWords; i++)
             {
                 w.word = 0;
@@ -472,9 +501,9 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        private byte WriteWordArray(ushort address, uint[] txd, ushort nWords)
+        private byte WriteWordArray(ushort address, int[] txd, ushort nWords)
         {
-            REG_t w = new();
+            MCP2518Dfs.REG_t w = new();
             ushort spiTransferSize = (ushort)(nWords * 4 + 2);
             byte spiTransferError = 0;
 
@@ -485,7 +514,7 @@ namespace MCP2518
             int n = 2;
             for (int i = 0; n < nWords; i++)
             {
-                w.word = txd[i];
+                w.word = (int)txd[i];
                 w.UpdateFromWord();
                 for (int j = 0; j < 4; j++, n++)
                 {
@@ -498,25 +527,19 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        private byte EccEnable()
+        private void EccEnable()
         {
-            byte spiTranferError = 0;
             byte d = 0;
 
             // Read
-            spiTranferError = ReadByte(MCP2518Dfs.cREGADDR_ECCCON, out d);
-            if (spiTranferError > 0)
-            {
-                return -1;
-            }
+            ReadByte(MCP2518Dfs.cREGADDR_ECCCON, out d);
+
 
             // Modify
             d |= 0x01;
 
             //Write
-            spiTranferError = WriteByte(MCP2518Dfs.cREGADDR_ECCCON, d);
-
-            return spiTranferError;
+            WriteByte(MCP2518Dfs.cREGADDR_ECCCON, d);
         }
 
         private byte RamInit(byte d)
@@ -542,10 +565,10 @@ namespace MCP2518
             return spiTransferError;
         }
 
-        private void ConfigureObjectReset(CAN_CONFIG config)
+        private void ConfigureObjectReset(MCP2518Dfs.CAN_CONFIG config)
         {
-            REG_CiCON ciCon = new REG_CiCON();
-            ciCon.word = MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiCON / 4];
+            MCP2518Dfs.REG_CiCON ciCon = new();
+            ciCon.word = (int)MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiCON / 4];
             ciCon.UpdateFromBytes();
 
             config.DNetFilterCount = ciCon.bF.DNetFilterCount;
@@ -562,12 +585,12 @@ namespace MCP2518
             config.TxBandWidthSharing = ciCon.bF.TxBandWidthSharing;
         }
 
-        private void Configure(CAN_CONFIG config)
+        private void Configure(MCP2518Dfs.CAN_CONFIG config)
         {
-            REG_CiCON ciCon = new();
+            MCP2518Dfs.REG_CiCON ciCon = new();
 
-            ciCon.word = MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiCON / 4];
-            ciCon.UpdateFromWord();
+            ciCon.word = (int)MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiCON / 4];
+            ciCon.UpdateFromWord();    
 
             ciCon.bF.DNetFilterCount = config.DNetFilterCount;
             ciCon.bF.IsoCrcEnable = config.IsoCrcEnable;
@@ -587,10 +610,10 @@ namespace MCP2518
 
         }
 
-        private void TransmitChannelConfigureObjectReset(CAN_TX_FIFO_CONFIG config)
+        private void TransmitChannelConfigureObjectReset(MCP2518Dfs.CAN_TX_FIFO_CONFIG config)
         {
-            REG_CiFIFOCON ciFifoCon = new ();
-            ciFifoCon.word = MCP2518Dfs.canFifoResetValues[0]; // 10010010100101010000
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            ciFifoCon.word = (int)MCP2518Dfs.canFifoResetValues[0]; // 10010010100101010000
             ciFifoCon.UpdateFromWord();
 
             config.RTREnable = ciFifoCon.txBF.RTREnable;
@@ -600,13 +623,13 @@ namespace MCP2518
             config.PayLoadSize = ciFifoCon.txBF.PayLoadSize;
         }
 
-        private void TransmitChannelConfigure(CAN_FIFO_CHANNEL channel, CAN_TX_FIFO_CONFIG config)
+        private void TransmitChannelConfigure(MCP2518Dfs.CAN_FIFO_CHANNEL channel, MCP2518Dfs.CAN_TX_FIFO_CONFIG config)
         {
             ushort a = 0;
 
             // Setup FIFO
-            REG_CiFIFOCON ciFifoCon = new();
-            ciFifoCon.word = MCP2518Dfs.canFifoResetValues[0];
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            ciFifoCon.word = (int)MCP2518Dfs.canFifoResetValues[0];
             ciFifoCon.UpdateFromWord();
 
             ciFifoCon.txBF.TxEnable = 1;
@@ -615,36 +638,1342 @@ namespace MCP2518
             ciFifoCon.txBF.TxAttempts = config.TxAttempts;
             ciFifoCon.txBF.TxPriority = config.TxPriority;
             ciFifoCon.txBF.RTREnable = config.RTREnable;
+            ciFifoCon.UpdateFromTxReg();
+
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET));
+
+            WriteWord(a, ciFifoCon.word);
         }
 
-        public override byte CheckClearRxStatus(out byte status)
+        private void ReceiveChannelConfigureObjectReset(MCP2518Dfs.CAN_RX_FIFO_CONFIG config)
         {
-            throw new NotImplementedException();
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            ciFifoCon.word = (int)MCP2518Dfs.canFifoResetValues[0];
+            ciFifoCon.UpdateFromWord();
+
+            config.FifoSize = ciFifoCon.rxBF.FifoSize;
+            config.PayLoadSize = ciFifoCon.rxBF.PayLoadSize;
+            config.RxTimeStampEnable = ciFifoCon.rxBF.RxTimeStampEnable;
         }
 
-        public override byte CheckClearTxStatus(out byte status)
+        private void ReceiveChannelConfigure(MCP2518Dfs.CAN_FIFO_CHANNEL channel, MCP2518Dfs.CAN_RX_FIFO_CONFIG config)
         {
-            throw new NotImplementedException();
+            ushort a = 0;
+
+            if (channel == MCP2518Dfs.CAN_TXQUEUE_CH0)
+            {
+                return;
+            }
+
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            ciFifoCon.word = (int)MCP2518Dfs.canFifoResetValues[0];
+            ciFifoCon.UpdateFromWord();
+
+            ciFifoCon.rxBF.TxEnable = 0;
+            ciFifoCon.rxBF.FifoSize = config.FifoSize;
+            ciFifoCon.rxBF.PayLoadSize = config.PayLoadSize;
+            ciFifoCon.rxBF.RxTimeStampEnable = config.RxTimeStampEnable;
+            ciFifoCon.UpdateFromRxReg();
+
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET));
+
+            WriteWord(a, ciFifoCon.word);
         }
 
-        public override byte CheckError(out byte err)
+        private void FilterObjectConfigure(MCP2518Dfs.CAN_FILTER filter, MCP2518Dfs.CAN_FILTEROBJ_ID id)
         {
-            throw new NotImplementedException();
+            ushort a = 0;
+            MCP2518Dfs.REG_CiFLTOBJ fObj = new();
+
+            fObj.word = 0;
+            fObj.UpdateFromWord();
+
+            fObj.bF = id;
+            fObj.UpdateFromReg();
+
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFLTOBJ + ((ushort)filter * MCP2518Dfs.CiFILTER_OFFSET));
+
+            WriteWord(a, fObj.word);
         }
 
-        public override byte CheckReceive()
+        private void FilterMaskConfigure(MCP2518Dfs.CAN_FILTER filter, MCP2518Dfs.CAN_MASKOBJ_ID mask)
         {
-            throw new NotImplementedException();
+            ushort a = 0;
+            MCP2518Dfs.REG_CiMASK mObj = new();
+
+            mObj.word = 0;
+            mObj.UpdateFromWord();
+
+            mObj.bF = mask;
+            mObj.UpdateFromReg();
+
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiMASK + ((ushort)filter * MCP2518Dfs.CiFILTER_OFFSET));
         }
 
-        public override void ClearBufferTransmitIfFlags(byte flags = 0)
+        private void FilterToFifoLink(MCP2518Dfs.CAN_FILTER filter, MCP2518Dfs.CAN_FIFO_CHANNEL channel, bool enable)
         {
-            throw new NotImplementedException();
+            ushort a = 0;
+            MCP2518Dfs.REG_CiFLTCON_BYTE fCtrl = new();
+
+            fCtrl.bF.Enable = enable ? (int)1 : 0;
+            fCtrl.bF.BufferPointer = (int)channel;
+            fCtrl.UpdateFromReg();
+
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFLTCON + (ushort)filter);
+
+            WriteByte(a, fCtrl.single_byte);
+        }
+
+        /*
+        * bittime calculation code from
+        *   https://github.com/pierremolinaro/acan2517FD
+        *
+        */
+
+        private const ushort MAX_BRP = 256;
+        private const ushort MAX_ARBITRATION_PHASE_SEGMENT_1 = 256;
+        private const byte MAX_ARBITRATION_PHASE_SEGMENT_2 = 128;
+        private const byte MAX_ARBITRATION_SJW = 128;
+        private const ushort MAX_DATA_PHASE_SEGMENT_1 = 32;
+        private const byte MAX_DATA_PHASE_SEGMENT_2 = 16;
+        private const byte MAX_DATA_SJW = 16;
+
+        private bool CalcBittime(uint inDesiredArbitrationBitRate, uint inTolerancePPM = 10000)
+        {
+            if (mDataBitRateFactor <= 1) // Single bit rate
+            {
+                uint maxTQCount = MAX_ARBITRATION_PHASE_SEGMENT_1 + MAX_ARBITRATION_PHASE_SEGMENT_2 + 1; // Setting for slowest bit rate
+                uint BRP = MAX_BRP;
+                uint smallestError = uint.MaxValue;
+                uint bestBRP = 1; // Setting for highest bit rate
+                uint bestTQCount = 4; // Setting for highest bit rate
+                uint TQCount = mSysClock / inDesiredArbitrationBitRate / BRP;
+                //--- Loop for finding best BRP and best TQCount
+                while ((TQCount <= (MAX_ARBITRATION_PHASE_SEGMENT_1 + MAX_ARBITRATION_PHASE_SEGMENT_2 + 1)) && BRP > 0)
+                {
+                    //--- Compute error using TQCount
+                    if ((TQCount >= 4) && TQCount <= maxTQCount)
+                    {
+                        uint error = mSysClock - inDesiredArbitrationBitRate * (TQCount + 1) * BRP - mSysClock; // error is always >= 0
+                        if (error <= smallestError)
+                        {
+                            smallestError = error;
+                            bestBRP = BRP;
+                            bestTQCount = TQCount + 1;
+                        }
+                    }
+                    //--- Compute error using TQCount+1
+                    if ((TQCount >= 3) && (TQCount < maxTQCount))
+                    {
+                        uint error = inDesiredArbitrationBitRate * (TQCount + 1) * BRP - mSysClock; // error is always >= 0
+                        if (error <= smallestError)
+                        {
+                            smallestError = error;
+                            bestBRP = BRP;
+                            bestTQCount = TQCount + 1;
+                        }
+                    }
+                    //--- Continue with next value of BRP
+                    BRP--;
+                    TQCount = (BRP == 0) ? (maxTQCount + 1) : (mSysClock / inDesiredArbitrationBitRate / BRP);
+                }
+                //--- Compute PS2 (1 <= PS2 <= 128)
+                uint PS2 = bestTQCount / 5; // For sampling point at 80%
+                if (PS2 == 0)
+                {
+                    PS2 = 1;
+                }
+                else if (PS2 > MAX_ARBITRATION_PHASE_SEGMENT_2)
+                {
+                    PS2 = MAX_ARBITRATION_PHASE_SEGMENT_2;
+                }
+                //--- Compute PS1 (1 <= PS1 <= 256)
+                uint PS1 = bestTQCount - PS2 - 1 /* Sync Seg */ ;
+                if (PS1 > MAX_ARBITRATION_PHASE_SEGMENT_1)
+                {
+                    PS2 += PS1 - MAX_ARBITRATION_PHASE_SEGMENT_1;
+                    PS1 = MAX_ARBITRATION_PHASE_SEGMENT_1;
+                }
+                //---
+                mBitRatePrescaler = (ushort)bestBRP;
+                mArbitrationPhaseSegment1 = (ushort)PS1;
+                mArbitrationPhaseSegment2 = (byte)PS2;
+                mArbitrationSJW = mArbitrationPhaseSegment2; // Always 1 <= SJW <= 128, and SJW <= mArbitrationPhaseSegment2
+                //--- Final check of the nominal configuration
+                uint W = bestTQCount * inDesiredArbitrationBitRate * bestBRP;
+                ulong diff = (mSysClock > W) ? (mSysClock - W) : (W - mSysClock);
+                ulong ppm = (1000UL * 1000UL);
+                mArbitrationBitRateClosedToDesiredRate = (diff * ppm) <= (((ulong)W) * inTolerancePPM);
+            }
+            else
+            {
+                uint maxDataTQCount = MAX_DATA_PHASE_SEGMENT_1 + MAX_DATA_PHASE_SEGMENT_2; // Setting for slowest bit rate
+                uint desiredDataBitRate = inDesiredArbitrationBitRate * (mDataBitRateFactor);
+                uint smallestError = uint.MaxValue;
+                uint bestBRP = MAX_BRP; // Setting for lowest bit rate
+                uint bestDataTQCount = maxDataTQCount; // Setting for lowest bit rate
+                uint dataTQCount = 4;
+                uint brp = mSysClock / desiredDataBitRate / dataTQCount;
+                //--- Loop for finding best BRP and best TQCount
+                while ((dataTQCount <= maxDataTQCount) && (brp > 0))
+                {
+                    //--- Compute error using brp
+                    if (brp <= MAX_BRP)
+                    {
+                        uint error = mSysClock - desiredDataBitRate * dataTQCount * brp; // error is always >= 0
+                        if (error <= smallestError)
+                        {
+                            smallestError = error;
+                            bestBRP = brp;
+                            bestDataTQCount = dataTQCount;
+                        }
+                    }
+                    //--- Compute error using brp+1
+                    if (brp < MAX_BRP)
+                    {
+                        uint error = desiredDataBitRate * dataTQCount * (brp + 1) - mSysClock; // error is always >= 0
+                        if (error <= smallestError)
+                        {
+                            smallestError = error;
+                            bestBRP = brp + 1;
+                            bestDataTQCount = dataTQCount;
+                        }
+                    }
+                    //--- Continue with next value of BRP
+                    dataTQCount += 1;
+                    brp = mSysClock / desiredDataBitRate / dataTQCount;
+                }
+                //--- Compute data PS2 (1 <= PS2 <= 16)
+                uint dataPS2 = bestDataTQCount / 5; // For sampling point at 80%
+                if (dataPS2 == 0)
+                {
+                    dataPS2 = 1;
+                }
+                //--- Compute data PS1 (1 <= PS1 <= 32)
+                uint dataPS1 = bestDataTQCount - dataPS2 - 1 /* Sync Seg */ ;
+                if (dataPS1 > MAX_DATA_PHASE_SEGMENT_1)
+                {
+                    dataPS2 += dataPS1 - MAX_DATA_PHASE_SEGMENT_1;
+                    dataPS1 = MAX_DATA_PHASE_SEGMENT_1;
+                }
+                int TDCO = (int)(bestBRP * dataPS1); // According to DS20005678D, ??3.4.8 Page 20
+                mTDCO = (sbyte)((TDCO > 63) ? 63 : (byte)TDCO);
+                mDataPhaseSegment1 = (byte)dataPS1;
+                mDataPhaseSegment2 = (byte)dataPS2;
+                mDataSJW = mDataPhaseSegment2;
+                uint arbitrationTQCount = bestDataTQCount * (mDataBitRateFactor);
+                //--- Compute arbiration PS2 (1 <= PS2 <= 128)
+                uint arbitrationPS2 = arbitrationTQCount / 5;
+                if (arbitrationPS2 == 0)
+                {
+                    arbitrationPS2 = 1;
+                }
+                //--- Compute PS1 (1 <= PS1 <= 256)
+                uint arbitrationPS1 = arbitrationTQCount - arbitrationPS2 - 1 /* Sync Seg */ ;
+                if (arbitrationPS1 > MAX_ARBITRATION_PHASE_SEGMENT_1)
+                {
+                    arbitrationPS2 += arbitrationPS1 - MAX_ARBITRATION_PHASE_SEGMENT_1;
+                    arbitrationPS1 = MAX_ARBITRATION_PHASE_SEGMENT_1;
+                }
+                //---
+                mBitRatePrescaler = (ushort)bestBRP;
+                mArbitrationPhaseSegment1 = (ushort)arbitrationPS1;
+                mArbitrationPhaseSegment2 = (byte)arbitrationPS2;
+                mArbitrationSJW = mArbitrationPhaseSegment2; // Always 1 <= SJW <= 128, and SJW <= mArbitrationPhaseSegment2
+                //--- Final check of the nominal configuration
+                uint W = arbitrationTQCount * inDesiredArbitrationBitRate * bestBRP;
+                ulong diff = (mSysClock > W) ? (mSysClock - W) : (W - mSysClock);
+                ulong ppm = (1000UL * 1000UL);
+                mArbitrationBitRateClosedToDesiredRate = (diff * ppm) <= (((ulong)W) * inTolerancePPM);
+            }
+            return mArbitrationBitRateClosedToDesiredRate;
+        }
+
+        private void BitTimeConfigureNominal()
+        {
+            MCP2518Dfs.REG_CiNBTCFG ciNbtcfg = new();
+
+            ciNbtcfg.word = (int)MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiNBTCFG / 4];
+            ciNbtcfg.UpdateFromWord();
+
+            // Arbitration Bit rate
+            ciNbtcfg.bF.BRP = mBitRatePrescaler - 1;
+            ciNbtcfg.bF.TSEG1 = mArbitrationPhaseSegment1 - 1;
+            ciNbtcfg.bF.TSEG2 = mArbitrationPhaseSegment2 - 1;
+            ciNbtcfg.bF.SJW = mArbitrationSJW - 1;
+
+            ciNbtcfg.UpdateFromReg();
+
+            WriteWord(MCP2518Dfs.cREGADDR_CiNBTCFG, ciNbtcfg.word);
+        }
+
+        private void BitTimeConfigureData(MCP2518Dfs.CAN_SSP_MODE sspMode)
+        {
+            MCP2518Dfs.REG_CiDBTCFG ciDbtcfg = new();
+            MCP2518Dfs.REG_CiTDC ciTdc = new();
+
+            // Write Bit time registers
+            ciDbtcfg.word = (int)MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiDBTCFG / 4];
+            ciDbtcfg.UpdateFromWord();
+
+            ciDbtcfg.bF.BRP = mBitRatePrescaler - 1;
+            ciDbtcfg.bF.TSEG1 = mDataPhaseSegment1 - 1;
+            ciDbtcfg.bF.TSEG2 = mDataPhaseSegment2 - 1;
+            ciDbtcfg.bF.SJW = mDataSJW - 1;
+            ciDbtcfg.UpdateFromReg();
+
+            WriteWord(MCP2518Dfs.cREGADDR_CiDBTCFG, ciDbtcfg.word);
+
+            // Configure Bit time and sample point, SSP
+            ciTdc.word = (int)MCP2518Dfs.canControlResetValues[MCP2518Dfs.cREGADDR_CiTDC / 4];
+            ciTdc.UpdateFromWord();
+
+            ciTdc.bF.TDCMode = (int)sspMode;
+            ciTdc.bF.TDCOffset = mTDCO;
+            ciTdc.UpdateFromReg();
+
+            WriteWord(MCP2518Dfs.cREGADDR_CiTDC, ciTdc.word);
+        }
+
+        private void BitTimeConfigure(MCP_BITTIME_SETUP speedset, MCP2518Dfs.CAN_SSP_MODE sspMode, MCP2518Dfs.CAN_SYSCLK_SPEED clk)
+        {
+            // Decode bitrate
+            mDesiredArbitrationBitRate = (uint)((uint)speedset & 0xFFFFFUL);
+            mDataBitRateFactor = (byte)(((uint)speedset >> 24) & 0xFF);
+
+            // Decode clk
+            switch (clk)
+            {
+                case MCP2518Dfs.CAN_SYSCLK_SPEED.CAN_SYSCLK_10M:
+                    mSysClock = (uint)(10UL * 1000UL * 1000UL);
+                    break;
+                case MCP2518Dfs.CAN_SYSCLK_SPEED.CAN_SYSCLK_20M:
+                    mSysClock = (uint)(20UL * 1000UL * 1000UL);
+                    break;
+                case MCP2518Dfs.CAN_SYSCLK_SPEED.CAN_SYSCLK_40M:
+                default:
+                    mSysClock = (uint)(40UL * 1000UL * 1000UL);
+                    break;
+            }
+
+            CalcBittime(mDesiredArbitrationBitRate);
+            BitTimeConfigureNominal();
+            BitTimeConfigureData(sspMode);
+        }
+
+        private void GpioModeConfigure(MCP2518Dfs.GPIO_PIN_MODE gpio0, MCP2518Dfs.GPIO_PIN_MODE gpio1)
+        {
+            // Read
+            ushort a = (ushort)(MCP2518Dfs.cREGADDR_IOCON + 3);
+            MCP2518Dfs.REG_IOCON iocon = new();
+            iocon.word = 0;
+            iocon.UpdateFromWord();
+
+            ReadByte(a, out iocon.bytes[3]);
+            iocon.UpdateFromBytes();
+
+            // Modify
+            iocon.bF.PinMode0 = (int)gpio0;
+            iocon.bF.PinMode1 = (int)gpio1;
+            iocon.UpdateFromReg();
+
+            WriteByte(a, iocon.bytes[3]);
+        }
+
+        private void TransmitChannelEventEnable(MCP2518Dfs.CAN_FIFO_CHANNEL channel, MCP2518Dfs.CAN_TX_FIFO_EVENT flags)
+        {
+            // Read Interrupt Enables
+            ushort a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + (ushort)((ushort)channel + MCP2518Dfs.CiFIFO_OFFSET));
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            ciFifoCon.word = 0;
+            ciFifoCon.UpdateFromWord();
+
+            ReadByte(a, out ciFifoCon.bytes[0]);
+            ciFifoCon.UpdateFromBytes();
+
+            // Modify
+            ciFifoCon.bytes[0] |= (byte)(flags & MCP2518Dfs.CAN_TX_FIFO_EVENT.CAN_TX_FIFO_ALL_EVENTS);
+            ciFifoCon.UpdateFromBytes();
+
+            // Write
+            WriteByte(a, ciFifoCon.bytes[0]);
+        }
+
+        private void ReceiveChannelEventEnable(MCP2518Dfs.CAN_FIFO_CHANNEL channel, MCP2518Dfs.CAN_RX_FIFO_EVENT flags)
+        {
+            ushort a = 0;
+
+            if (channel == MCP2518Dfs.CAN_TXQUEUE_CH0)
+            {
+                return;
+            }
+
+            // Read Interrupt Enables
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + ((uint)channel * MCP2518Dfs.CiFIFO_OFFSET));
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            ciFifoCon.word = 0;
+            ciFifoCon.UpdateFromWord();
+
+            ReadByte(a, out ciFifoCon.bytes[0]);
+            ciFifoCon.UpdateFromBytes();
+
+            //Modify
+            ciFifoCon.bytes[0] |= (byte)(flags & MCP2518Dfs.CAN_RX_FIFO_EVENT.CAN_RX_FIFO_ALL_EVENTS);
+
+            //Write
+            WriteByte(a, ciFifoCon.bytes[0]);
+        }
+
+        private void ModuleEventEnable(MCP2518Dfs.CAN_MODULE_EVENT flags)
+        {
+            ushort a = 0;
+
+            // Read Interrupt Enables
+            a = MCP2518Dfs.cREGADDR_CiINTENABLE;
+            MCP2518Dfs.REG_CiINTENABLE intEnables = new();
+            intEnables.word = 0;
+            intEnables.UpdateFromWord();
+
+            ReadHalfWord(a, out intEnables.word);
+            intEnables.UpdateFromWord();
+
+            // Modify
+            intEnables.word |= (short)(flags & MCP2518Dfs.CAN_MODULE_EVENT.CAN_ALL_EVENTS);
+
+            // Write
+            WriteHalfWord(a, intEnables.word);
+        }
+
+        private void OperationModeSelect(CAN_OPERATION_MODE opMode)
+        {
+            byte d = 0;
+
+            ReadByte((ushort)(MCP2518Dfs.cREGADDR_CiCON + 3), out d);
+
+            d &= 0b11111000;
+            d |= (byte)opMode;
+
+            WriteByte((ushort)(MCP2518Dfs.cREGADDR_CiCON + 3), d);
+        }
+
+        private CAN_OPERATION_MODE OperationModeGet()
+        {
+            byte d;
+            CAN_OPERATION_MODE mode = CAN_OPERATION_MODE.CAN_INVALID_MODE;
+
+            // Read Mode
+            ReadByte((ushort)(MCP2518Dfs.cREGADDR_CiCON + 2), out d);
+
+            // Get Opmode bits
+            d = (byte)((d >> 5) & 0x7);
+
+            // Decode Opmode
+            switch ((CAN_OPERATION_MODE)d)
+            {
+                case CAN_OPERATION_MODE.CAN_NORMAL_MODE:
+                    mode = CAN_OPERATION_MODE.CAN_NORMAL_MODE;
+                    break;
+                case CAN_OPERATION_MODE.CAN_SLEEP_MODE:
+                    mode = CAN_OPERATION_MODE.CAN_SLEEP_MODE;
+                    break;
+                case CAN_OPERATION_MODE.CAN_INTERNAL_LOOPBACK_MODE:
+                    mode = CAN_OPERATION_MODE.CAN_INTERNAL_LOOPBACK_MODE;
+                    break;
+                case CAN_OPERATION_MODE.CAN_EXTERNAL_LOOPBACK_MODE:
+                    mode = CAN_OPERATION_MODE.CAN_EXTERNAL_LOOPBACK_MODE;
+                    break;
+                case CAN_OPERATION_MODE.CAN_LISTEN_ONLY_MODE:
+                    mode = CAN_OPERATION_MODE.CAN_LISTEN_ONLY_MODE;
+                    break;
+                case CAN_OPERATION_MODE.CAN_CONFIGURATION_MODE:
+                    mode = CAN_OPERATION_MODE.CAN_CONFIGURATION_MODE;
+                    break;
+                case CAN_OPERATION_MODE.CAN_CLASSIC_MODE:
+                    mode = CAN_OPERATION_MODE.CAN_CLASSIC_MODE;
+                    break;
+                case CAN_OPERATION_MODE.CAN_RESTRICTED_MODE:
+                    mode = CAN_OPERATION_MODE.CAN_RESTRICTED_MODE;
+                    break;
+                default:
+                    mode = CAN_OPERATION_MODE.CAN_INVALID_MODE;
+                    break;
+            }
+
+            return mode;
+        }
+
+        private void TransmitChannelEventGet(MCP2518Dfs.CAN_FIFO_CHANNEL channel, out MCP2518Dfs.CAN_TX_FIFO_EVENT flags)
+        {
+            ushort a;
+
+            // Read Interrupt flags
+            MCP2518Dfs.REG_CiFIFOSTA ciFifoSta = new();
+            ciFifoSta.word = 0;
+            ciFifoSta.UpdateFromWord();
+
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOSTA + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET));
+
+            ReadByte(a, out ciFifoSta.bytes[0]);
+            ciFifoSta.UpdateFromBytes();
+
+            //Update data
+            flags = (MCP2518Dfs.CAN_TX_FIFO_EVENT)ciFifoSta.bytes[0] & MCP2518Dfs.CAN_TX_FIFO_EVENT.CAN_TX_FIFO_ALL_EVENTS;
+        }
+
+        private void ErrorCountStateGet(out byte tec, out byte rec, out MCP2518Dfs.CAN_ERROR_STATE flags)
+        {
+            // Read Error
+            ushort a = MCP2518Dfs.cREGADDR_CiTREC;
+            MCP2518Dfs.REG_CiTREC ciTrec = new();
+            ciTrec.word = 0;
+            ciTrec.UpdateFromWord();
+
+            ReadWord(a, out ciTrec.word);
+            ciTrec.UpdateFromWord();
+
+            // Update Data
+            tec = ciTrec.bytes[0];
+            rec = ciTrec.bytes[1];
+            flags = ((MCP2518Dfs.CAN_ERROR_STATE)ciTrec.bytes[3] & MCP2518Dfs.CAN_ERROR_STATE.CAN_ERROR_ALL);
+        }
+
+
+        // *****************************************************************************
+        // *****************************************************************************
+        // Miscellaneous
+
+        byte DlcToDataBytes(CAN_DLC dlc)
+        {
+            byte dataBytesInObject = 0;
+
+            if (dlc < CAN_DLC.CAN_DLC_12)
+            {
+                dataBytesInObject = (byte)dlc;
+            }
+            else
+            {
+                switch (dlc)
+                {
+                    case CAN_DLC.CAN_DLC_12:
+                        dataBytesInObject = 12;
+                        break;
+                    case CAN_DLC.CAN_DLC_16:
+                        dataBytesInObject = 16;
+                        break;
+                    case CAN_DLC.CAN_DLC_20:
+                        dataBytesInObject = 20;
+                        break;
+                    case CAN_DLC.CAN_DLC_24:
+                        dataBytesInObject = 24;
+                        break;
+                    case CAN_DLC.CAN_DLC_32:
+                        dataBytesInObject = 32;
+                        break;
+                    case CAN_DLC.CAN_DLC_48:
+                        dataBytesInObject = 48;
+                        break;
+                    case CAN_DLC.CAN_DLC_64:
+                        dataBytesInObject = 64;
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            return dataBytesInObject;
+        }
+
+        private void TransmitChannelLoad(MCP2518Dfs.CAN_FIFO_CHANNEL channel, MCP2518Dfs.CAN_TX_MSGOBJ txObj, byte[] txd, uint txdNumBytes, bool flush) 
+        {
+            ushort a;
+            int[] fifoReg = new int[3];
+            uint dataBytesInObject;
+            byte i = 0;
+
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            MCP2518Dfs.REG_CiFIFOUA ciFifoUa = new();
+
+            // Get FIFO registers
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET));
+
+            ReadWordArray(a, fifoReg, 3);
+            ciFifoCon.word = fifoReg[0];
+            ciFifoCon.UpdateFromWord();
+
+            dataBytesInObject = DlcToDataBytes((CAN_DLC)txObj.bF.ctrl.DLC);
+            if(dataBytesInObject < txdNumBytes)
+            {
+                return;
+            }
+
+            // Get Address
+            ciFifoUa.word = fifoReg[2];
+            ciFifoUa.UpdateFromWord();
+
+            a = (ushort)ciFifoUa.bF.UserAddress;
+            a += MCP2518Dfs.cRAMADDR_START;
+
+            byte[] txBuffer = new byte[MCP2518Dfs.MAX_MSG_SIZE];
+
+            for(i = 0; i < 8; i++)
+            {
+                txBuffer[i] = txObj.bytes[i];
+            }
+
+            for (i = 0; i < txdNumBytes; i++)
+            {
+                txBuffer[i + 8] = txd[i];
+            }
+
+            ushort n = 0;
+            byte j = 0;
+            
+
+            if(txdNumBytes % 4 > 0)
+            {
+                n = (ushort)(4 - (txdNumBytes % 4));
+                i = (byte)(txdNumBytes + 8);
+
+                for (j = 0; j < n; j++)
+                {
+                    txBuffer[i + 8 + j] = 0;
+                }
+            }
+
+            WriteByteArray(a, txBuffer, (ushort)(txdNumBytes + 8 + n));
+
+            // Set UINC and TXREQ
+            TransmitChannelUpdate(channel, flush);
+        }
+
+        private void ReceiveChannelEventGet(MCP2518Dfs.CAN_FIFO_CHANNEL channel, out MCP2518Dfs.CAN_RX_FIFO_EVENT flags)
+        {
+            ushort a;
+
+            if(channel == MCP2518Dfs.CAN_TXQUEUE_CH0)
+            {
+                flags = MCP2518Dfs.CAN_RX_FIFO_EVENT.CAN_RX_FIFO_NO_EVENT;
+                return;
+            }
+
+            // Read Interrupt fkafs
+            MCP2518Dfs.REG_CiFIFOSTA ciFifoSta = new();
+            ciFifoSta.word = 0;
+            ciFifoSta.UpdateFromWord();
+
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOSTA + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET));
+
+            ReadByte(a, out ciFifoSta.bytes[0]);
+
+            flags = (MCP2518Dfs.CAN_RX_FIFO_EVENT)ciFifoSta.bytes[0] & MCP2518Dfs.CAN_RX_FIFO_EVENT.CAN_RX_FIFO_ALL_EVENTS;
+        }
+
+        private void ReceiveMessageGet(MCP2518Dfs.CAN_FIFO_CHANNEL channel, MCP2518Dfs.CAN_RX_MSGOBJ rxObj, byte[] rxd, byte nBytes)
+        {
+            byte n = 0, i = 0;
+            ushort a;
+            int[] fifoReg = new int[3];
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            MCP2518Dfs.REG_CiFIFOUA ciFifoUa = new();
+
+            // Get Fifo registers
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET));
+
+            ReadWordArray(a, fifoReg, 3);
+
+            ciFifoCon.word = fifoReg[0];
+            ciFifoCon.UpdateFromWord();
+            ciFifoCon.txBF.TxEnable = 0;
+
+            // Get address
+            ciFifoUa.word = fifoReg[2];
+            ciFifoUa.UpdateFromWord();
+
+            a = (ushort)ciFifoUa.bF.UserAddress;
+            a += MCP2518Dfs.cRAMADDR_START;
+
+            // Number of bytes to read
+            n = (byte)(nBytes + 8); // Add 8 header bytes
+
+            if (ciFifoCon.rxBF.RxTimeStampEnable > 0)
+            {
+                n += 4; // Add 4 time stamp bytes
+            }
+
+            // Make sure we read a multiple of 4 bytes from RAM
+            if (n % 4 > 0)
+            {
+                n = (byte)(n + 4 - (n % 4));
+            }
+
+            // Read rxObj using one access
+            byte[] ba = new byte[MCP2518Dfs.MAX_MSG_SIZE];
+
+            if(n > MCP2518Dfs.MAX_MSG_SIZE)
+            {
+                n = (byte)MCP2518Dfs.MAX_MSG_SIZE;
+            }
+
+            ReadByteArray(a, ba, n);
+
+            // Assagin message header
+            MCP2518Dfs.REG_t myReg = new();
+
+            myReg.bytes[0] = ba[0];
+            myReg.bytes[1] = ba[1];
+            myReg.bytes[2] = ba[2];
+            myReg.bytes[3] = ba[3];
+            myReg.UpdateFromBytes();
+            rxObj.word[0] = myReg.word;
+
+            myReg.bytes[0] = ba[4];
+            myReg.bytes[1] = ba[5];
+            myReg.bytes[2] = ba[6];
+            myReg.bytes[3] = ba[7];
+            myReg.UpdateFromBytes();
+            rxObj.word[1] = myReg.word;
+
+            if (ciFifoCon.rxBF.RxTimeStampEnable > 0)
+            {
+                myReg.bytes[0] = ba[8];
+                myReg.bytes[1] = ba[9];
+                myReg.bytes[2] = ba[10];
+                myReg.bytes[3] = ba[11];
+                myReg.UpdateFromBytes();
+                rxObj.word[2] = myReg.word;
+
+                // Assign message data
+                for (i = 0; i < nBytes; i++)
+                {
+                    rxd[i] = ba[i + 12];
+                }
+            }
+            else
+            {
+                rxObj.word[2] = 0;
+
+                // Assign message data
+                for (i = 0; i < nBytes; i++)
+                {
+                    rxd[i] = ba[i + 8];
+                }
+            }
+            rxObj.UpdateFromWord();
+
+            // UINC channel
+            ReceiveChannelUpdate(channel);
+        }
+
+        private void ReceiveChannelUpdate(MCP2518Dfs.CAN_FIFO_CHANNEL channel)
+        {
+            ushort a;
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+            ciFifoCon.word = 0;
+            ciFifoCon.UpdateFromWord();
+
+            // Set UINC
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET) + 
+                1); // Byte that contains FRESET
+            ciFifoCon.rxBF.UINC = 1;
+            ciFifoCon.UpdateFromRxReg();
+
+            WriteByte(a, ciFifoCon.bytes[1]);
+        }
+
+        private void TransmitChannelUpdate(MCP2518Dfs.CAN_FIFO_CHANNEL channel, bool flush)
+        {
+            ushort a;
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+
+            // Set UINC
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET) +
+                1); // Byte that contains FRESET
+            ciFifoCon.word = 0;
+            ciFifoCon.UpdateFromWord();
+            ciFifoCon.txBF.UINC = 1;
+            ciFifoCon.UpdateFromTxReg();
+
+            // Set TXREQ
+            if (flush)
+            {
+                ciFifoCon.txBF.TxRequest = 1;
+                ciFifoCon.UpdateFromTxReg();
+            }
+
+            WriteByte(a, ciFifoCon.bytes[1]);
+        }
+
+        private void ReceiveChannelStatusGet(MCP2518Dfs.CAN_FIFO_CHANNEL channel, out MCP2518Dfs.CAN_RX_FIFO_STATUS status)
+        {
+            ushort a;
+            MCP2518Dfs.REG_CiFIFOCON ciFifoCon = new();
+
+            // Read
+            ciFifoCon.word = 0;
+            ciFifoCon.UpdateFromWord();
+
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOCON + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET));
+            ReadByte(a, out ciFifoCon.bytes[0]);
+
+            ciFifoCon.UpdateFromBytes();
+
+            status = (MCP2518Dfs.CAN_RX_FIFO_STATUS)(ciFifoCon.bytes[0] & 0x0F);
+        }
+
+        private void ErrorStateGet(out MCP2518Dfs.CAN_ERROR_STATE flags)
+        {
+            // Read Error state
+            byte f = 0;
+
+            ReadByte((ushort)(MCP2518Dfs.cREGADDR_CiTREC + 2), out f);
+
+            // Update data
+            flags = (MCP2518Dfs.CAN_ERROR_STATE)(f * (int)MCP2518Dfs.CAN_ERROR_STATE.CAN_ERROR_ALL);
+        }
+
+        private void ModuleEventRxCodeGet(out MCP2518Dfs.CAN_RXCODE rxCode)
+        {
+            byte rxCodeByte;
+
+            ReadByte((ushort)(MCP2518Dfs.cREGADDR_CiVEC + 3), out rxCodeByte);
+
+            // Decode data
+            // 0x40 = "no interrupt" (CAN_FIFO_CIVEC_NOINTERRUPT)
+            if(rxCodeByte < (byte)MCP2518Dfs.CAN_RXCODE.CAN_RXCODE_TOTAL_CHANNELS || rxCodeByte == (byte)MCP2518Dfs.CAN_RXCODE.CAN_RXCODE_NO_INT)
+            {
+                rxCode = (MCP2518Dfs.CAN_RXCODE)rxCodeByte;
+            }
+            else
+            {
+                rxCode = MCP2518Dfs.CAN_RXCODE.CAN_RXCODE_RESERVED; // shouldn't get here
+            }
+        }
+
+        private void ModuleEventTxCodeGet(out MCP2518Dfs.CAN_TXCODE txCode)
+        {
+            ushort a;
+            byte txCodeByte;
+
+            // Read
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiVEC + 2);
+
+            ReadByte(a, out txCodeByte);
+
+            // Decode data
+            // 0x40 = "no interrupt" (CAN_FIFO_CIVEC_NOINTERRUPT)
+            if ((txCodeByte < (byte)MCP2518Dfs.CAN_TXCODE.CAN_TXCODE_TOTAL_CHANNELS) ||
+            (txCodeByte == (byte)MCP2518Dfs.CAN_TXCODE.CAN_TXCODE_NO_INT))
+            {
+                txCode = (MCP2518Dfs.CAN_TXCODE)txCodeByte;
+            }
+            else
+            {
+                txCode = MCP2518Dfs.CAN_TXCODE.CAN_TXCODE_RESERVED; // shouldn't get here
+            }
+        }
+
+        private void TransmitChannelEventAttemptClear(MCP2518Dfs.CAN_FIFO_CHANNEL channel)
+        {
+            ushort a;
+
+            // Read Interrup Enables
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFIFOSTA + ((ushort)channel * MCP2518Dfs.CiFIFO_OFFSET));
+            MCP2518Dfs.REG_CiFIFOSTA ciFifoSta = new();
+            ciFifoSta.word = 0;
+            ciFifoSta.UpdateFromWord();
+
+            ReadByte(a, out ciFifoSta.bytes[0]);
+            ciFifoSta.UpdateFromBytes();
+
+            // Modify
+            ciFifoSta.bytes[0] &= 0b11101111;
+            ciFifoSta.UpdateFromBytes();
+
+            // Write
+            WriteByte(a, ciFifoSta.bytes[0]);
+        }
+
+        public void LowPowerModeEnable()
+        {
+            byte d;
+
+            // Read
+            ReadByte(MCP2518Dfs.cREGADDR_OSC, out d);
+
+            // Modify
+            d |= 0x08;
+
+            // Write
+            WriteByte(MCP2518Dfs.cREGADDR_OSC, d);
+        }
+
+        private void LowPowerModeDisable()
+        {
+            byte d;
+
+            // Read
+            ReadByte(MCP2518Dfs.cREGADDR_OSC, out d);
+
+            // Modify
+            d |= 0xF7;
+
+            // Write
+            WriteByte(MCP2518Dfs.cREGADDR_OSC, d);
+        }
+
+        private void TransmitMessageQueue()
+        {
+            byte attempts = (byte)MAX_TXQUEUE_ATTEMPTS;
+            MCP2518Dfs.CAN_ERROR_STATE errorFlags;
+            byte tec, rec;
+
+            // Check if FIFO is not full
+            do
+            {
+                TransmitChannelEventGet(APP_TX_FIFO, out txFlags);
+                if (attempts == 0)
+                {
+                    ErrorCountStateGet(out tec, out rec, out errorFlags);
+                    return;
+                }
+                attempts--;
+            } while (!((txFlags & MCP2518Dfs.CAN_TX_FIFO_EVENT.CAN_TX_FIFO_NOT_FULL_EVENT) > 0));
+
+            // Load message and transmit
+            byte n = (byte)DlcToDataBytes((CAN_DLC)txObj.bF.ctrl.DLC);
+            TransmitChannelLoad(APP_TX_FIFO, txObj, txd, n, true);
+        }
+
+
+        private void SendMsg(byte[] buf, byte len, ulong id, byte ext, byte rtr, bool wait_sent)
+        {
+            byte n;
+            int i;
+
+            // Configure message object
+            txObj.word[0] = 0;
+            txObj.word[1] = 0;
+            txObj.word[2] = 0;
+            txObj.UpdateFromWord();
+
+            txObj.bF.ctrl.RTR = rtr > 0 ? 1 : 0;
+            if (rtr > 0 && len > (int)CAN_DLC.CAN_DLC_8)
+            {
+                len = (byte)CAN_DLC.CAN_DLC_8;
+            }
+
+            txObj.bF.ctrl.DLC = len;
+
+            txObj.bF.ctrl.IDE = ext > 0 ? 1 : 0;
+            if (ext > 0)
+            {
+                txObj.bF.id.SID = (int)((id >> 18) & 0x7FF);
+                txObj.bF.id.EID = (int)(id & 0x3FFFF);
+            }
+            else
+            {
+                txObj.bF.id.SID = (int)id;
+            }
+
+            txObj.bF.ctrl.BRS = 1;
+            txObj.bF.ctrl.FDF = _flgFDF ? 1 : 0;
+
+            txObj.UpdateFromReg();
+
+
+            n = (byte)DlcToDataBytes((CAN_DLC)txObj.bF.ctrl.DLC);
+            // Prepare data
+            for (i = 0; i < n; i++)
+            {
+                txd[i] = buf[i];
+            }
+
+            TransmitMessageQueue();
+        }
+
+        private void ReceiveMsg()
+        {
+            ReceiveChannelEventGet(APP_RX_FIFO, out rxFlags);
+
+            if((rxFlags & MCP2518Dfs.CAN_RX_FIFO_EVENT.CAN_RX_FIFO_NOT_EMPTY_EVENT) > 0)
+            {
+                ReceiveMessageGet(APP_RX_FIFO, rxObj, rxd, 8);
+            }
+        }
+
+        private uint BittimeCompatToMcp2518fd(MCP_BITTIME_SETUP speedset)
+        {
+            uint r = 0;
+
+            if((uint)speedset > 0x100)
+            {
+                return (uint)speedset;
+            }
+
+            switch (speedset)
+            {
+                case MCP_BITTIME_SETUP.CAN20_5KBPS: r = CANFD.BITRATE(5000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_10KBPS: r = CANFD.BITRATE(10000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_20KBPS: r = CANFD.BITRATE(20000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_25KBPS: r = CANFD.BITRATE(25000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_31K25BPS: r = CANFD.BITRATE(31250, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_33KBPS: r = CANFD.BITRATE(33000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_40KBPS: r = CANFD.BITRATE(40000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_50KBPS: r = CANFD.BITRATE(50000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_80KBPS: r = CANFD.BITRATE(80000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_83K3BPS: r = CANFD.BITRATE(83300, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_95KBPS: r = CANFD.BITRATE(95000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_100KBPS: r = CANFD.BITRATE(100000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_125KBPS: r = CANFD.BITRATE(125000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_200KBPS: r = CANFD.BITRATE(200000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_250KBPS: r = CANFD.BITRATE(250000, 0); break;
+                default:
+                case MCP_BITTIME_SETUP.CAN20_500KBPS: r = CANFD.BITRATE(500000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_666KBPS: r = CANFD.BITRATE(666000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_800KBPS: r = CANFD.BITRATE(800000, 0); break;
+                case MCP_BITTIME_SETUP.CAN20_1000KBPS: r = CANFD.BITRATE(1000000, 0); break;
+            }
+
+            return r;
+        }
+
+        private void Init(MCP_BITTIME_SETUP speedset, MCP2518Dfs.CAN_SYSCLK_SPEED clock)
+        {
+            // Reset device
+            Reset();
+
+            // Enable ECC and initialize RAM
+            EccEnable();
+
+            RamInit(0xff);
+
+            // Configure device
+            ConfigureObjectReset(config);
+            config.IsoCrcEnable = 1;
+            config.StoreInTEF = 0;
+            Configure(config);
+
+            // Setup TX FIFO
+            TransmitChannelConfigureObjectReset(txConfig);
+            txConfig.FifoSize = 7;
+            txConfig.PayLoadSize = (int)MCP2518Dfs.CAN_FIFO_PLSIZE.CAN_PLSIZE_64;
+            txConfig.TxPriority = 1;
+            TransmitChannelConfigure(APP_TX_FIFO, txConfig);
+
+            // Setup RX FIFO
+            ReceiveChannelConfigureObjectReset(rxConfig);
+            rxConfig.FifoSize = 15;
+            rxConfig.PayLoadSize = (int)MCP2518Dfs.CAN_FIFO_PLSIZE.CAN_PLSIZE_64; ;
+            ReceiveChannelConfigure(APP_RX_FIFO, rxConfig);
+
+            for (int i = 0; i < 32; i++)
+                FilterDisable((MCP2518Dfs.CAN_FILTER)i);          // disable all filter
+
+            // Link FIFO to Filter
+            FilterToFifoLink(MCP2518Dfs.CAN_FILTER.CAN_FILTER0, APP_RX_FIFO, true);
+
+            // Setup Bit Time
+            BitTimeConfigure(speedset, MCP2518Dfs.CAN_SSP_MODE.CAN_SSP_MODE_AUTO, clock);
+
+            // Setup Transmit and Receive Interrupts
+            GpioModeConfigure(MCP2518Dfs.GPIO_PIN_MODE.GPIO_MODE_INT, MCP2518Dfs.GPIO_PIN_MODE.GPIO_MODE_INT);
+
+            ReceiveChannelEventEnable(APP_RX_FIFO, MCP2518Dfs.CAN_RX_FIFO_EVENT.CAN_RX_FIFO_NOT_EMPTY_EVENT);
+            ModuleEventEnable((MCP2518Dfs.CAN_MODULE_EVENT.CAN_TX_EVENT | MCP2518Dfs.CAN_MODULE_EVENT.CAN_RX_EVENT));
+            SetMode(mcpMode);
         }
 
         public override void EnableTxInterrupt(bool enable = true)
         {
-            throw new NotImplementedException();
+            if (enable)
+            {
+                ModuleEventEnable(MCP2518Dfs.CAN_MODULE_EVENT.CAN_TX_EVENT);
+            }
+        }
+
+        public void FilterDisable(MCP2518Dfs.CAN_FILTER filter)
+        {
+            ushort a;
+            MCP2518Dfs.REG_CiFLTCON_BYTE fCtrl = new();
+
+            // Read
+            a = (ushort)(MCP2518Dfs.cREGADDR_CiFLTCON + filter);
+            ReadByte(a, out fCtrl.single_byte);
+            fCtrl.UpdateFromByte();
+
+            // Modify
+            fCtrl.bF.Enable = 0;
+            fCtrl.UpdateFromReg();
+
+            WriteByte(a, fCtrl.single_byte);
+        }
+
+        public void InitFiltMask(MCP2518Dfs.CAN_FILTER num, bool ext, ulong f, ulong m)
+        {
+            OperationModeSelect(CAN_OPERATION_MODE.CAN_CONFIGURATION_MODE);
+
+            FilterDisable(num);
+
+            MCP2518Dfs.CAN_FILTEROBJ_ID fObj = new();
+            if (ext)
+            {
+                fObj.SID = 0;
+                fObj.SID11 = (int)(f >> 18);
+                fObj.EID = (int)(f & 0x3ffff);
+                fObj.EXIDE = 1;
+            }
+            else
+            {
+                fObj.SID = (int)f;
+                fObj.SID11 = 0;
+                fObj.EID = 0;
+                fObj.EXIDE = 0;
+            }
+            
+            FilterObjectConfigure(num, fObj);
+
+            MCP2518Dfs.CAN_MASKOBJ_ID mObj = new();
+
+            if (ext)
+            {
+                mObj.MSID = 0;
+                mObj.MSID11 = (int)(m >> 18);
+                mObj.MEID = (int)(m & 0x3ffff);
+                mObj.MIDE = 1;
+            }
+            else
+            {
+                mObj.MSID = (int)m;
+                mObj.MSID11 = 0;
+                mObj.MEID = 0;
+                mObj.MIDE = 1;
+            }
+            FilterMaskConfigure(num, mObj);
+
+            FilterToFifoLink(num, APP_RX_FIFO, true);
+
+            OperationModeSelect(mcpMode);
+        }
+
+        public override void SetSleepWakeup(bool enable)
+        {
+            if (enable)
+            {
+                LowPowerModeEnable();
+            }
+            else
+            {
+                LowPowerModeDisable();
+            }
+        }
+
+        public override byte Sleep()
+        {
+            if(GetMode() != (CAN_OPERATION_MODE)0x01)
+            {
+                OperationModeSelect(CAN_OPERATION_MODE.CAN_SLEEP_MODE);
+                return 0;
+            }
+            else
+            {
+                return CAN_OK;
+            }
+        }
+        public override byte Wake()
+        {
+            CAN_OPERATION_MODE currMode = GetMode();
+            if(currMode != mcpMode)
+            {
+                OperationModeSelect(mcpMode);
+                return 0;
+            }
+            else
+            {
+                return 0;
+            }
+        }
+
+
+        public override byte SetMode(CAN_OPERATION_MODE opMode)
+        {
+            if(opMode != CAN_OPERATION_MODE.CAN_SLEEP_MODE)
+            {
+                mcpMode = opMode;
+            }
+            OperationModeSelect(opMode);
+
+            return 0;
+        }
+
+        public CAN_OPERATION_MODE GetMode()
+        {
+            return OperationModeGet();
+        }
+
+        public override void ReadMsgBufID(MCP2518Dfs.CAN_RX_FIFO_EVENT status, out ulong id, out byte ext, out byte rtr, out byte len, byte[] buf)
+        {
+            ReadMsgBufID(out len, buf);
+
+            id = can_id;
+            ext = ext_flag;
+            rtr = this.rtr;
+        }
+
+        /* wrapper */
+        public override void ReadMsgBufID(out ulong ID, out byte len, byte[] buf)
+        {
+            ReadMsgBufID(ReadRxTxStatus(), out ID, out ext_flag, out rtr, out len, buf);
+        }
+        public override void ReadMsgBuf(out byte len, byte[] buf)
+        {
+            ReadMsgBufID(ReadRxTxStatus(), out can_id, out ext_flag, out rtr, out len, buf);
+        }
+
+        public override byte CheckReceive()
+        {
+            MCP2518Dfs.CAN_RX_FIFO_STATUS status;
+
+            ReceiveChannelStatusGet(APP_RX_FIFO, out status);
+
+            byte res = (byte)(status & MCP2518Dfs.CAN_RX_FIFO_STATUS.CAN_RX_FIFO_NOT_EMPTY);
+
+            return res;
+        }
+
+        public override void CheckError(out MCP2518Dfs.CAN_ERROR_STATE err)
+        {
+            ErrorStateGet(out err);
+        }
+
+        public void ReadMsgBufID(out byte len, byte[] buf)
+        {
+            ReceiveMessageGet(APP_RX_FIFO, rxObj, rxd, (byte)MCP2518Dfs.MAX_DATA_BYTES);
+            ext_flag = (byte)rxObj.bF.ctrl.IDE;
+            can_id = ext_flag > 0 ? (ulong)(rxObj.bF.id.EID | (rxObj.bF.id.SID << 18)) : (ulong)rxObj.bF.id.SID;
+            rtr = (byte)rxObj.bF.ctrl.RTR;
+
+            byte n = DlcToDataBytes((CAN_DLC)rxObj.bF.ctrl.DLC);
+            len = n;
+
+            for (int i = 0; i < n; i++)
+            {
+                buf[i] = rxd[i];
+            }
+        }
+
+        public override byte TrySendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf)
+        {
+            SendMsg(buf, len, id, ext, rtr, false);
+            return 0;
+        }
+
+        public override void ClearBufferTransmitIfFlags(byte flags = 0)
+        {
+            TransmitChannelEventAttemptClear(APP_TX_FIFO);
+        }
+
+        public override byte SendMsgBuf(byte status, ulong id, byte ext, byte rtr, byte len, byte[] buf)
+        {
+            SendMsg(buf, len, id, ext, rtr, true);
+
+            return 0;
+        }
+
+        public override byte SendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, bool waitSent = true)
+        {
+            SendMsg(buf, len, id, ext, rtr, waitSent);
+
+            return 0;
+        }
+
+        public void SendMsgBuf(ulong id, byte ext, byte len, byte[] buf)
+        {
+            SendMsgBuf(id, ext, 0, len, buf, true);
+        }
+
+        public override MCP2518Dfs.CAN_RX_FIFO_EVENT ReadRxTxStatus()
+        {
+            ReceiveChannelEventGet(APP_RX_FIFO, out rxFlags);
+
+            return rxFlags;
+        }
+
+        public override void McpPinMode(MCP2518Dfs.GPIO_PIN_POS pin, MCP2518Dfs.GPIO_PIN_MODE mode)
+        {
+            ushort a = (ushort)(MCP2518Dfs.cREGADDR_IOCON + 3);
+            MCP2518Dfs.REG_IOCON iocon = new();
+            iocon.word = 0;
+            iocon.UpdateFromWord();
+
+            ReadByte(a, out iocon.bytes[3]);
+
+            iocon.UpdateFromBytes();
+
+            if(pin == MCP2518Dfs.GPIO_PIN_POS.GPIO_PIN_0)
+            {
+                // Modify
+                iocon.bF.PinMode0 = (int)mode;
+            }
+            if(pin == MCP2518Dfs.GPIO_PIN_POS.GPIO_PIN_1)
+            {
+                // Modify
+                iocon.bF.PinMode1 = (int)mode;
+            }
+            iocon.UpdateFromReg();
+
+            WriteByte(a, iocon.bytes[3]);
+        }
+
+        public override void DigitalWrite(MCP2518Dfs.GPIO_PIN_POS pin, MCP2518Dfs.GPIO_PIN_STATE state)
+        {
+            ushort a = (ushort)(MCP2518Dfs.cREGADDR_IOCON + 3);
+            MCP2518Dfs.REG_IOCON iocon = new();
+            iocon.word = 0;
+            iocon.UpdateFromWord();
+
+            ReadByte(a, out iocon.bytes[1]);
+
+            switch (pin)
+            {
+                case MCP2518Dfs.GPIO_PIN_POS.GPIO_PIN_0:
+                    iocon.bF.LAT0 = (int)state;
+                    break;
+                case MCP2518Dfs.GPIO_PIN_POS.GPIO_PIN_1:
+                    iocon.bF.LAT1 = (int)state;
+                    break;
+                default:
+                    return;
+            }
+
+            iocon.UpdateFromReg();
+
+            WriteByte(a, iocon.bytes[1]);
+
+        }
+
+        public override MCP2518Dfs.GPIO_PIN_STATE DigitalRead(MCP2518Dfs.GPIO_PIN_POS pin)
+        {
+            MCP2518Dfs.GPIO_PIN_STATE state = MCP2518Dfs.GPIO_PIN_STATE.GPIO_LOW;
+
+            ushort a = (ushort)(MCP2518Dfs.cREGADDR_IOCON + 2);
+            MCP2518Dfs.REG_IOCON iocon = new();
+            iocon.word = 0;
+            iocon.UpdateFromWord();
+
+            ReadByte(a, out iocon.bytes[2]);
+
+            switch (pin)
+            {
+                case MCP2518Dfs.GPIO_PIN_POS.GPIO_PIN_0:
+                    state = (MCP2518Dfs.GPIO_PIN_STATE)iocon.bF.GPIO0;
+                    break;
+                case MCP2518Dfs.GPIO_PIN_POS.GPIO_PIN_1:
+                    state = (MCP2518Dfs.GPIO_PIN_STATE)iocon.bF.GPIO1;
+                    break;
+            }
+
+
+            return state;
         }
 
         public override byte GetLastTxBuffer()
@@ -652,80 +1981,15 @@ namespace MCP2518
             throw new NotImplementedException();
         }
 
-        public override byte McpDigitalRead(byte pin)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override bool McpDigitalWrite(byte pin, byte mode)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override bool McpPinMode(byte pin, byte mode)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override byte ReadMessageBuf(out byte len, byte[] buf)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override byte ReadMessageBufID(out ulong id, out byte ext, out byte trt, out byte len, out byte[] buf)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override byte ReadMessageBufID(out ulong ID, out byte len, byte[] buf)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override byte ReadRxTxStatus()
-        {
-            throw new NotImplementedException();
-        }
 
         public override void ReserveTxBuffers(byte nTxBuf = 0)
         {
             throw new NotImplementedException();
         }
 
-        public override byte SendMsgBuf(byte status, ulong id, byte ext, byte rtr, byte len, byte[] buf)
-        {
-            throw new NotImplementedException();
-        }
 
-        public override byte SendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, bool waitSent = true)
-        {
-            throw new NotImplementedException();
-        }
 
-        public override byte SetMode(CAN_OPERATION_MODE opMode)
-        {
-            throw new NotImplementedException();
-        }
 
-        public override void SetSleepWakeup(bool enable)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override byte Sleep()
-        {
-            throw new NotImplementedException();
-        }
-
-        public override byte TrySendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, byte iTxBuf = 255)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override byte Wake()
-        {
-            throw new NotImplementedException();
-        }
     }
 
     /// <summary>Represents a CAN message.</summary>
@@ -740,19 +2004,4 @@ namespace MCP2518
 
         public byte[] buf = new byte[MCP2518Dfs.MAX_DATA_BYTES];
     }
-
-    public class ByteArrayCRC
-    {
-        public bool crcIsCorrect;
-        public byte[] rxd;
-    }
-
-    public class ErrorCountState
-    {
-        public byte tec;
-        public byte rec;
-        public CAN_ERROR_STATE flags;
-    }
 }
-
-

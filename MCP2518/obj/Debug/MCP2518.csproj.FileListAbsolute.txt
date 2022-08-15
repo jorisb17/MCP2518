@@ -11,3 +11,16 @@ C:\WorkingRetina\MCP2518\MCP2518\obj\Debug\MCP2518.csproj.CoreCompileInputs.cach
 C:\WorkingRetina\MCP2518\MCP2518\obj\Debug\MCP2518.csproj.CopyComplete
 C:\WorkingRetina\MCP2518\MCP2518\obj\Debug\MCP2518.exe
 C:\WorkingRetina\MCP2518\MCP2518\obj\Debug\MCP2518.pdb
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\bin\Debug\MCP2518.exe
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\bin\Debug\MCP2518.pdb
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\bin\Debug\GHIElectronics.TinyCLR.Devices.Gpio.dll
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\bin\Debug\GHIElectronics.TinyCLR.Devices.Spi.dll
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\bin\Debug\GHIElectronics.TinyCLR.Native.dll
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\bin\Debug\GHIElectronics.TinyCLR.Pins.dll
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\bin\Debug\mscorlib.dll
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\obj\Debug\MCP2518.csproj.AssemblyReference.cache
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\obj\Debug\MCP2518.csproj.SuggestedBindingRedirects.cache
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\obj\Debug\MCP2518.csproj.CoreCompileInputs.cache
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\obj\Debug\MCP2518.csproj.CopyComplete
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\obj\Debug\MCP2518.exe
+C:\Users\joris\Documents\Retina\MCP2518\MCP2518\obj\Debug\MCP2518.pdb

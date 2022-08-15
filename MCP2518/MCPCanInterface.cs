@@ -108,7 +108,6 @@ namespace MCP2518
         protected ulong can_id;
         protected byte rtr;
         protected SpiDevice spi;
-        protected byte mcpMode;
 
         public abstract void EnableTxInterrupt(bool enable = true);
         public abstract void ReserveTxBuffers(byte nTxBuf = 0);
@@ -123,15 +122,15 @@ namespace MCP2518
         public abstract byte Wake();
         public abstract byte SetMode(CAN_OPERATION_MODE opMode);
 
-        public abstract byte CheckError(out byte err);
+        public abstract void CheckError(out MCP2518Dfs.CAN_ERROR_STATE err);
         
         /* ---- receiving ---- */
         public abstract byte CheckReceive();
-        public abstract byte ReadMessageBufID(out ulong id, out byte ext, out byte trt, out byte len, out byte[] buf);
+        public abstract void ReadMsgBufID(MCP2518Dfs.CAN_RX_FIFO_EVENT status, out ulong id, out byte ext, out byte rtr, out byte len, byte[] buf);
 
         /* wrapper */
-        public abstract byte ReadMessageBufID(out ulong ID, out byte len, byte[] buf);
-        public abstract byte ReadMessageBuf(out byte len, byte[] buf);
+        public abstract void ReadMsgBufID(out ulong ID, out byte len, byte[] buf);
+        public abstract void ReadMsgBuf(out byte len, byte[] buf);
 
         /* could be called after a successful readMsgBufID() */
         public ulong GetCanId()
@@ -150,20 +149,18 @@ namespace MCP2518
         }
 
         /* ---- sending ---- */
-        public abstract byte TrySendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, byte iTxBuf = 0xff);  // as sendMsgBuf, but does not have any wait for free buffer
+        public abstract byte TrySendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf);  // as sendMsgBuf, but does not have any wait for free buffer
         public abstract byte SendMsgBuf(byte status, ulong id, byte ext, byte rtr, byte len, byte[] buf); // send message buf by using parsed buffer status
         public abstract byte SendMsgBuf(ulong id, byte ext, byte rtr, byte len, byte[] buf, bool waitSent = true); // send message with wait
 
         public abstract void ClearBufferTransmitIfFlags(byte flags = 0);
-        public abstract byte ReadRxTxStatus();
-        public abstract byte CheckClearRxStatus(out byte status);
-        public abstract byte CheckClearTxStatus(out byte status);
-        public abstract bool McpPinMode(byte pin, byte mode);
-        public abstract bool McpDigitalWrite(byte pin, byte mode);
-        public abstract byte McpDigitalRead(byte pin);
+        public abstract MCP2518Dfs.CAN_RX_FIFO_EVENT ReadRxTxStatus();
+        public abstract void McpPinMode(MCP2518Dfs.GPIO_PIN_POS pin, MCP2518Dfs.GPIO_PIN_MODE mode);
+        public abstract void DigitalWrite(MCP2518Dfs.GPIO_PIN_POS pin, MCP2518Dfs.GPIO_PIN_STATE state);
+        public abstract MCP2518Dfs.GPIO_PIN_STATE DigitalRead(MCP2518Dfs.GPIO_PIN_POS pin);
 
         /* CANFD Auxiliary helper */
-        protected class CANFD
+        public static class CANFD
         {
             public static byte Dlc2len(byte dlc)
             {
